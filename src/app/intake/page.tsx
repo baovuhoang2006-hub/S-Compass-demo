@@ -241,8 +241,14 @@ export default function IntakePage() {
               </ul>
             ) : null}
             <div className="border-t border-line px-4 py-3">
-              <h3 className="text-sm font-semibold">Detected Column Mapping</h3>
-              <details className="ui-disclosure mt-2 text-sm"><summary className="w-fit cursor-pointer text-info">Show Mapped Columns</summary><dl className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(batch.columns).map(([field, original]) => <div key={field} className="rounded-md bg-canvas px-3 py-2"><dt className="break-words font-medium">{original}</dt><dd className="break-all text-xs text-ink-soft">→ {field}</dd></div>)}</dl></details>
+              <details className="ui-disclosure text-sm">
+                <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 font-semibold">
+                  <span>Column Recognition</span>
+                  <span className="text-xs font-normal text-ink-soft">{Object.keys(batch.columns).length} columns recognized · {(["order_id", "rider_id", "date", "location_type"] as const).filter((field) => field in batch.columns).length}/4 required fields found · View mappings</span>
+                </summary>
+                <p className="mt-2 text-xs text-ink-soft">See how columns from your file were matched to S-Compass fields. This does not change your data.</p>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-2">{Object.entries(batch.columns).map(([field, original]) => <div key={field} className="rounded-md bg-canvas px-3 py-2"><dt className="break-words font-medium">{original}</dt><dd className="break-all text-xs text-ink-soft">→ {field}</dd></div>)}</dl>
+              </details>
             </div>
           </Panel>
 
