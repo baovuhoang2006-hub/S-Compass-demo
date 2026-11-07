@@ -196,6 +196,26 @@ export function StopCardDialog({
   );
 }
 
+/** Compact in-context review used by Dispatcher; all decisions use the same state actions as the full Stop Cards page. */
+export function InlineStopCardReview({ cardKey, stopId }: { cardKey: string; stopId: string }) {
+  const { state, update, cards, shift } = useDemo();
+  const card = cards[cardKey];
+  const stop = shift.stops.find((item) => item.id === stopId);
+  const pending = state.corrections.filter((item) => item.locationKey === cardKey && item.status === "pending");
+  if (!card || !stop) return null;
+  return <section className="border-t border-line bg-canvas/60 px-4 py-4" aria-label={`Stop Card review ${stopId}`}>
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div><h3 className="font-semibold">Stop Card · {stopId} · {card.name}</h3><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-faint"><CardStatusBadge status={card.status} /><span>Nguồn: {card.source}</span><span>Đã xác minh: {card.lastVerified ?? "chưa xác minh"}{card.verifiedBy ? ` bởi ${card.verifiedBy}` : ""}</span></div></div>
+    </div>
+    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+      <div><b>Cửa vào / bàn giao</b><p>{card.entrance} · {card.handover}</p><p className="text-xs text-ink-faint">Nguồn cửa vào: {card.entranceSource}</p></div>
+      <div><b>Khung giờ và ảnh hưởng</b>{card.restrictions.length ? <ul className="list-inside list-disc">{card.restrictions.map((r) => <li key={`${r.code}:${r.text}`}><span className={r.strength === "hard" ? "text-ok" : "text-warn"}>{r.strength === "hard" ? "Ràng buộc bắt buộc" : "Khuyến nghị mềm"}</span>: {r.text} · {r.source}</li>)}</ul> : <p className="text-ink-faint">Chưa ghi nhận ràng buộc khung giờ.</p>}</div>
+    </div>
+    {pending.length ? <div className="mt-3 rounded-lg border border-warn/40 bg-warn-tint/50 p-3"><b className="text-sm">Đề xuất cần duyệt</b><ul className="mt-2 space-y-2">{pending.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{c.field.replace("_", " ")}: {c.text} — {c.proposedBy}</span><span className="flex gap-2"><Button size="sm" variant="ok" onClick={() => update((s) => decideCorrection(s, c.id, true))}><Check /> Duyệt</Button><Button size="sm" variant="danger" onClick={() => update((s) => decideCorrection(s, c.id, false, "Rejected in dispatcher Stop Card review"))}><X /> Từ chối</Button></span></li>)}</ul><p className="mt-2 text-xs text-ink-faint">Thông tin thay đổi sau khi người điều phối duyệt; chưa tự động áp dụng.</p></div> : null}
+    <CardActions cardKey={cardKey} />
+  </section>;
+}
+
 function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
   return (
     <div className="flex gap-3">
