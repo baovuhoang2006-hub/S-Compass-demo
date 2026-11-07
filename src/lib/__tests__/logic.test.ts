@@ -21,6 +21,7 @@ import {
   planFor,
   cardsFor,
   comparePlans,
+  comparisonRunIdFor,
 } from "../demoState";
 import { toCsv } from "../evidence";
 import { tableP } from "../successTable";
@@ -171,6 +172,15 @@ describe("KPI comparison provenance", () => {
     expect(first.comparison?.map((p) => p.totals.expectedSuccess)).toEqual(second.comparison?.map((p) => p.totals.expectedSuccess));
     expect(first.comparison?.find((p) => p.method === "model")?.totals.modelExpectedSuccess).toBeGreaterThan(0);
     expect(first.comparison?.find((p) => p.method === "rules")?.totals.modelExpectedSuccess).toBeNull();
+  });
+
+  it("invalidates a comparison when buyer commitments change", () => {
+    const initial = initialState();
+    const compared = comparePlans(initial);
+    expect(compared.comparisonMeta?.runId).toBe(comparisonRunIdFor(compared));
+    const stopId = shiftById(initial.shiftId).stops[0].id;
+    const changed = buyerConfirm(compared, stopId, "morning");
+    expect(comparisonRunIdFor(changed)).not.toBe(compared.comparisonMeta?.runId);
   });
 
   it("matches Calculation Sheet totals across all 12 rider-days", () => {

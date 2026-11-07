@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, DoorOpen, MapPin, ShieldAlert, Timer, TriangleAlert, X } from "lucide-react";
+import { Check, DoorOpen, MapPin, Timer, TriangleAlert, X } from "lucide-react";
 import * as React from "react";
 import { CardStatusBadge, SourceTag, TYPE_LABEL } from "@/components/bits";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,11 @@ export function StopCardDialog({
 }) {
   const { state, update, cards, shift } = useDemo();
   const logged = React.useRef<string | null>(null);
+  const [actionNotice, setActionNotice] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    setActionNotice(null);
+  }, [cardKey]);
+
   React.useEffect(() => {
     if (open && cardKey && logged.current !== cardKey) {
       logged.current = cardKey;
@@ -42,178 +47,42 @@ export function StopCardDialog({
   const pending = state.corrections.filter((c) => c.locationKey === cardKey && c.status === "pending");
   const overlay = state.overlays[cardKey];
   const isDispatcher = state.role === "dispatcher";
+  if (!card) return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title={card.name} description={`${TYPE_LABEL[card.type]} · stop knowledge card${stop ? ` · order ${stop.id}` : ""}`} wide>
+      <DialogContent title="Stop Card Details" description={`${card.name} · ${TYPE_LABEL[card.type]}${stop ? ` · Stop ${stop.id}` : ""}`} wide className="sm:max-h-[88vh]">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <CardStatusBadge status={card.status} />
-          <span className="text-sm text-ink-faint">
-            Last verified: <span className="text-ink">{card.lastVerified ?? "never"}</span>
-            {card.verifiedBy ? ` by ${card.verifiedBy}` : ""}
-          </span>
-          {overlay?.verificationRequested && card.status !== "verified" ? <span className="text-sm text-warn">Rider confirmed on site — waiting for dispatcher</span> : null}
+          <span className="text-sm text-ink-faint">{card.name}{stop ? ` · Stop ${stop.id}` : ""}</span>
+          {overlay?.verificationRequested && card.status !== "verified" ? <span className="text-sm text-warn">Rider confirmed on site — waiting for dispatcher review.</span> : null}
           {card.status === "disputed" && overlay?.disputeReason ? <span className="text-sm text-bad">Disputed: {overlay.disputeReason}</span> : null}
         </div>
-
         {card.temporaryClosure ? (
           <div role="status" className="mb-4 flex gap-2 rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">
             <TriangleAlert className="mt-0.5 size-4 shrink-0" /> {card.temporaryClosure.text}
           </div>
         ) : null}
+        <div className="grid gap-5 md:grid-cols-[minmax(0,1.5fr)_minmax(260px,1fr)]">
+          <div className="space-y-4 text-sm">
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Location &amp; Entrance</h3><p className="font-medium">{card.name} · {TYPE_LABEL[card.type]}</p>{stop ? <p className="text-xs text-ink-faint">Stop {stop.id}</p> : null}<Row icon={<DoorOpen />} label="Suggested entrance"><p className="font-medium">{card.entrance}</p>{card.alternateEntrance ? <p className="text-ink-soft">Alternate: {card.alternateEntrance}</p> : null}<p className="mt-1 text-xs text-ink-faint">{card.entranceSource}</p></Row><Row icon={<Timer />} label="Estimated service time"><p>{stop?.serviceMinutes ?? card.serviceMinutes ?? "—"} min <span className="text-xs text-ink-faint">{stop?.serviceMinutes != null ? "(this order's processing-time field)" : "(site median from dataset)"}</span></p></Row></section>
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Handover Instructions</h3><Row icon={<MapPin />} label="Instructions"><p>{card.handover}</p></Row></section>
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Receiving Windows</h3>{card.receivingWindows.length ? <ul className="list-disc space-y-1 pl-5">{card.receivingWindows.map((w) => <li key={w}>{w}</li>)}</ul> : <p className="text-ink-faint">No receiving window recorded.</p>}</section>
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Rules &amp; Restrictions</h3>{card.restrictions.length ? <ul className="space-y-1">{card.restrictions.map((r) => <li key={r.code + r.text}><span className={cn("font-medium", r.strength === "hard" ? "text-ok" : "text-warn")}>{r.strength === "hard" ? "Verified rule — planner must respect" : "Unverified recommendation — planner prefers"}</span>: {r.text} <span className="text-xs text-ink-faint">({r.source})</span></li>)}</ul> : <p className="text-ink-faint">No rules recorded.</p>}{card.access.length ? <div className="mt-2"><b>Access restrictions</b><ul className="list-disc pl-5">{card.access.map((a) => <li key={a}>{a}</li>)}</ul></div> : null}<p className="mt-2 text-xs text-ink-faint">Verified rules constrain a new plan. Unverified suggestions are preferences only.</p></section>
+          </div>
 
-        <div className="grid gap-5 md:grid-cols-[1fr_260px]">
-          <dl className="space-y-4 text-sm">
-            <Row icon={<DoorOpen />} label="Suggested entrance">
-              <p className="font-medium">{card.entrance}</p>
-              {card.alternateEntrance ? <p className="text-ink-soft">Alternate: {card.alternateEntrance}</p> : null}
-              <p className="mt-1 text-xs text-ink-faint">{card.entranceSource}</p>
-            </Row>
-            <Row icon={<MapPin />} label="Handover instructions">
-              <p>{card.handover}</p>
-            </Row>
-            <Row icon={<ShieldAlert />} label="Access restrictions">
-              {card.access.length ? (
-                <ul className="list-disc pl-4">
-                  {card.access.map((a) => (
-                    <li key={a}>{a}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-ink-faint">None recorded</p>
-              )}
-            </Row>
-            <Row icon={<Timer />} label="Receiving windows">
-              {card.restrictions.length || card.receivingWindows.length ? (
-                <ul className="space-y-1">
-                  {card.restrictions.map((r) => (
-                    <li key={r.code + r.text}>
-                      {r.text}{" "}
-                      <span className={cn("text-xs", r.strength === "hard" ? "text-ok" : "text-warn")}>
-                        {r.strength === "hard" ? "planner must respect" : "planner prefers (not yet verified)"}
-                      </span>
-                    </li>
-                  ))}
-                  {card.receivingWindows
-                    .filter((w) => !card.restrictions.some((r) => r.text === w))
-                    .map((w) => (
-                      <li key={w} className="text-ink-soft">
-                        {w} <span className="text-xs text-ink-faint">(information only)</span>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="text-ink-faint">No receiving window recorded</p>
-              )}
-            </Row>
-            <Row icon={<Timer />} label="Estimated service time">
-              <p>
-                {stop?.serviceMinutes ?? card.serviceMinutes ?? "—"} min{" "}
-                <span className="text-xs text-ink-faint">{stop?.serviceMinutes != null ? "(this order's processing-time field)" : "(site median from dataset)"}</span>
-              </p>
-            </Row>
-          </dl>
-
-          <aside className="space-y-3 text-sm">
-            <div className="rounded-lg border border-line p-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="font-medium">Source</span>
-                <SourceTag kind={card.source.startsWith("Demo fixture") ? "fixture" : card.source.startsWith("Dataset") ? "dataset" : "live"} />
-              </div>
-              <p className="text-ink-soft">{card.source}</p>
-            </div>
-            <div className="rounded-lg border border-line p-3">
-              <div className="mb-2 font-medium">Delivery history at this site</div>
-              <table className="w-full text-xs">
-                <thead className="text-ink-faint">
-                  <tr>
-                    <th className="text-left font-normal">Block</th>
-                    <th className="text-right font-normal">Weekday</th>
-                    <th className="text-right font-normal">Weekend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {BLOCKS.map((b) => {
-                    const wd = card.windowHistory[`${b.id}|weekday`];
-                    const we = card.windowHistory[`${b.id}|weekend`];
-                    return (
-                      <tr key={b.id}>
-                        <td className="py-0.5">{b.label}</td>
-                        <td className="text-right">{wd?.attempts ? `${wd.delivered}/${wd.attempts}` : "—"}</td>
-                        <td className="text-right">{we?.attempts ? `${we.delivered}/${we.attempts}` : "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-              <p className="mt-2 text-[11px] text-ink-faint">Delivered/attempts. Dataset visits (Sep 2026) plus outcomes recorded in this demo.</p>
-            </div>
-            {card.pastIssues.length ? (
-              <div className="rounded-lg border border-line p-3">
-                <div className="mb-1 font-medium">Past issues noted by riders</div>
-                <ul className="space-y-0.5 text-ink-soft">
-                  {card.pastIssues.map((i) => (
-                    <li key={i.text}>
-                      {i.text} <span className="text-ink-faint">×{i.count}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+          <aside className="space-y-4 text-sm">
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Data Source &amp; Verification</h3><div className="flex flex-wrap items-center gap-2"><CardStatusBadge status={card.status} /><SourceTag kind={card.source.startsWith("Demo fixture") ? "fixture" : card.source.startsWith("Dataset") ? "dataset" : "live"} /></div><p className="mt-2 text-ink-soft">{card.source}</p><dl className="mt-2 space-y-1 text-xs"><div><dt className="inline text-ink-faint">Last verified: </dt><dd className="inline">{card.lastVerified ?? "Not verified"}{card.verifiedBy ? ` by ${card.verifiedBy}` : ""}</dd></div><div><dt className="inline text-ink-faint">Entrance source: </dt><dd className="inline">{card.entranceSource}</dd></div></dl></section>
+            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Historical Delivery Information</h3><table className="w-full text-xs"><thead className="text-ink-faint"><tr><th className="text-left font-normal">Block</th><th className="text-right font-normal">Weekday</th><th className="text-right font-normal">Weekend</th></tr></thead><tbody>{BLOCKS.map((b) => {const wd = card.windowHistory[`${b.id}|weekday`];const we = card.windowHistory[`${b.id}|weekend`];return <tr key={b.id}><td className="py-0.5">{b.label}</td><td className="text-right">{wd?.attempts ? `${wd.delivered}/${wd.attempts}` : "—"}</td><td className="text-right">{we?.attempts ? `${we.delivered}/${we.attempts}` : "—"}</td></tr>;})}</tbody></table><p className="mt-2 text-[11px] text-ink-faint">Delivered/attempts. Dataset visits (Sep 2026) plus outcomes recorded in this demo.</p>{card.pastIssues.length ? <div className="mt-3"><b>Past issues noted by riders</b><ul className="mt-1 space-y-0.5 text-ink-soft">{card.pastIssues.map((i) => <li key={i.text}>{i.text} <span className="text-ink-faint">×{i.count}</span></li>)}</ul></div> : null}</section>
           </aside>
         </div>
 
-        {pending.length ? (
-          <div className="mt-5 rounded-lg border border-warn/40 bg-warn-tint/50 p-3">
-            <p className="mb-2 text-sm font-medium">Corrections waiting for dispatcher review</p>
-            <ul className="space-y-2">
-              {pending.map((c) => (
-                <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                  <span>
-                    <span className="font-medium">{c.field.replace("_", " ")}</span>: {c.text} <span className="text-ink-faint">— {c.proposedBy}</span>
-                  </span>
-                  {isDispatcher ? (
-                    <span className="flex gap-2">
-                      <Button size="sm" variant="ok" onClick={() => update((s) => decideCorrection(s, c.id, true))}>
-                        <Check /> Approve
-                      </Button>
-                      <Button size="sm" variant="danger" onClick={() => update((s) => decideCorrection(s, c.id, false, "Rejected in stop card"))}>
-                        <X /> Reject
-                      </Button>
-                    </span>
-                  ) : (
-                    <span className="text-xs text-ink-faint">Switch demo role to Dispatcher to review</span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
-
-        <CardActions cardKey={cardKey} />
+        <section className="mt-4 rounded-lg border border-warn/40 bg-warn-tint/30 p-3"><h3 className="mb-2 font-semibold">Pending Corrections</h3>{pending.length ? <ul className="space-y-2">{pending.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span><b>{c.field.replace("_", " ")}</b>: {c.text} <span className="text-ink-faint">— {c.proposedBy}</span></span>{isDispatcher ? <span className="flex gap-2"><Button size="sm" variant="ok" onClick={() => {update((s) => decideCorrection(s, c.id, true));setActionNotice("Correction approved. Review and generate a new plan before dispatch; the current dispatched route and buyer commitments are unchanged.");}}><Check /> Approve</Button><Button size="sm" variant="danger" onClick={() => {update((s) => decideCorrection(s, c.id, false, "Rejected in stop card"));setActionNotice("Correction rejected. The card and active plan remain unchanged.");}}><X /> Reject</Button></span> : <span className="text-xs text-ink-faint">Switch demo role to Dispatcher to review.</span>}</li>)}</ul> : <p className="text-sm text-ink-faint">No pending corrections.</p>}</section>
+        {actionNotice ? <p role="status" className="mt-3 rounded-lg bg-info-tint px-3 py-2 text-sm text-info">{actionNotice}</p> : null}
+        <section className="mt-4 border-t border-line pt-4"><h3 className="mb-3 font-semibold">Dispatcher Actions</h3><CardActions cardKey={cardKey} /></section>
       </DialogContent>
     </Dialog>
   );
-}
-
-/** Compact in-context review used by Dispatcher; all decisions use the same state actions as the full Stop Cards page. */
-export function InlineStopCardReview({ cardKey, stopId }: { cardKey: string; stopId: string }) {
-  const { state, update, cards, shift } = useDemo();
-  const card = cards[cardKey];
-  const stop = shift.stops.find((item) => item.id === stopId);
-  const pending = state.corrections.filter((item) => item.locationKey === cardKey && item.status === "pending");
-  if (!card || !stop) return null;
-  return <section className="border-t border-line bg-canvas/60 px-4 py-4" aria-label={`Stop Card review ${stopId}`}>
-    <div className="flex flex-wrap items-center justify-between gap-2">
-      <div><h3 className="font-semibold">Stop Card · {stopId} · {card.name}</h3><div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink-faint"><CardStatusBadge status={card.status} /><span>Nguồn: {card.source}</span><span>Đã xác minh: {card.lastVerified ?? "chưa xác minh"}{card.verifiedBy ? ` bởi ${card.verifiedBy}` : ""}</span></div></div>
-    </div>
-    <div className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
-      <div><b>Cửa vào / bàn giao</b><p>{card.entrance} · {card.handover}</p><p className="text-xs text-ink-faint">Nguồn cửa vào: {card.entranceSource}</p></div>
-      <div><b>Khung giờ và ảnh hưởng</b>{card.restrictions.length ? <ul className="list-inside list-disc">{card.restrictions.map((r) => <li key={`${r.code}:${r.text}`}><span className={r.strength === "hard" ? "text-ok" : "text-warn"}>{r.strength === "hard" ? "Ràng buộc bắt buộc" : "Khuyến nghị mềm"}</span>: {r.text} · {r.source}</li>)}</ul> : <p className="text-ink-faint">Chưa ghi nhận ràng buộc khung giờ.</p>}</div>
-    </div>
-    {pending.length ? <div className="mt-3 rounded-lg border border-warn/40 bg-warn-tint/50 p-3"><b className="text-sm">Đề xuất cần duyệt</b><ul className="mt-2 space-y-2">{pending.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{c.field.replace("_", " ")}: {c.text} — {c.proposedBy}</span><span className="flex gap-2"><Button size="sm" variant="ok" onClick={() => update((s) => decideCorrection(s, c.id, true))}><Check /> Duyệt</Button><Button size="sm" variant="danger" onClick={() => update((s) => decideCorrection(s, c.id, false, "Rejected in dispatcher Stop Card review"))}><X /> Từ chối</Button></span></li>)}</ul><p className="mt-2 text-xs text-ink-faint">Thông tin thay đổi sau khi người điều phối duyệt; chưa tự động áp dụng.</p></div> : null}
-    <CardActions cardKey={cardKey} />
-  </section>;
 }
 
 function Row({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {

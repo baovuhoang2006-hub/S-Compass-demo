@@ -158,6 +158,24 @@ export function planFor(state: DemoState, method: PlanMethod): Plan {
   });
 }
 
+/** Stable identifier for the inputs used by a KPI comparison, excluding draft plans and event-log noise. */
+export function comparisonRunIdFor(state: DemoState): string {
+  const shift = shiftById(state.shiftId);
+  const snapshot = JSON.stringify({
+    shiftId: shift.id,
+    date: shift.date,
+    stops: shift.stops,
+    stopStates: state.stopStates[state.shiftId],
+    cards: cardsFor(state),
+    outcomes: state.outcomes,
+    start: riderPosition(state),
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < snapshot.length; i++) hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
+  const fingerprint = (hash >>> 0).toString(16).padStart(8, "0");
+  return `compare-${shift.id}-${fingerprint}`;
+}
+
 function describePlan(p: Plan) {
   return `${p.totals.stops} stops · expected ${p.totals.expectedSuccess.toFixed(1)} successful first attempts (of ${p.totals.estimatedStops} estimated) · ${p.totals.distanceKm.toFixed(1)} km · ends ${fmt(p.totals.endMin)} · ${p.totals.flagged} flagged`;
 }
@@ -239,22 +257,10 @@ export function comparePlans(state: DemoState): DemoState {
       : 0;
   }
   const shift = shiftById(state.shiftId);
-  const snapshot = JSON.stringify({
-    shiftId: shift.id,
-    date: shift.date,
-    stops: shift.stops,
-    stopStates: state.stopStates[state.shiftId],
-    cards: cardsFor(state),
-    outcomes: state.outcomes,
-    start: riderPosition(state),
-  });
-  let hash = 2166136261;
-  for (let i = 0; i < snapshot.length; i++) hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
-  const fingerprint = (hash >>> 0).toString(16).padStart(8, "0");
   const eligibleEstimatedStops = commonEligibleIds.size;
   const comparisonMeta: ComparisonMetadata = {
     scenarioId: `${shift.id}:${shift.date}`,
-    runId: `compare-${shift.id}-${fingerprint}`,
+    runId: comparisonRunIdFor(state),
     createdAt: new Date().toISOString(),
     dataset: shift.id.startsWith("imp-")
       ? "User-imported browser-only batch (validated; imported orders only)"

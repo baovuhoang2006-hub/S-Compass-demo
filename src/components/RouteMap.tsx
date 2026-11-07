@@ -135,14 +135,14 @@ export function RouteMap({
           const lead = open[0] ?? g[0];
           const done = open.length === 0;
           const isSel = g.some((s) => s.stopId === selected);
-          const label = g.length > 1 ? `${g.length} đơn` : `#${g[0].seq}`;
+          const label = g.length > 1 ? `${g.length} orders` : `#${g[0].seq}`;
           const blocks = Array.from(new Set(open.map((s) => s.block)));
           return (
             <g
               key={g[0].stopId}
               role={onSelect ? "button" : undefined}
               tabIndex={onSelect ? 0 : undefined}
-              aria-label={g.length > 1 ? `${g.length} đơn tại một địa điểm: thứ tự ${g.map((s) => s.seq).join(", ")}` : `Stop thứ tự ${g[0].seq}, ${g[0].stopId}`}
+              aria-label={g.length > 1 ? `${g.length} orders at one location: stop sequence ${g.map((s) => s.seq).join(", ")}` : `Stop sequence ${g[0].seq}, ${g[0].stopId}`}
               onClick={() => onSelect?.(lead.stopId)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") onSelect?.(lead.stopId);
@@ -166,10 +166,10 @@ export function RouteMap({
         </g> : null}
       </svg>
       <figcaption className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-ink-faint">
-        {finish && finalStop ? <span><b>START:</b> HUB → theo thứ tự tuyến → <b>FINISH:</b> #{finalStop.seq} · {finalStop.stopId}.</span> : <span><b>START:</b> HUB. Chưa có FINISH hợp lệ.</span>}
-        <span>#N là thứ tự stop; “N đơn” là số đơn ở cùng một địa điểm.</span>
-        <span>Sơ đồ vị trí đã ẩn danh, không phải bản đồ đường phố; đường thẳng không thể hiện đường đi thực tế.</span>
-        {!finish && stops.length ? <span className="text-warn">Chưa thể hiện FINISH: stop cuối chưa có vị trí hợp lệ hoặc chưa được xếp lịch.</span> : null}
+        {finish && finalStop ? <span><b>START:</b> HUB → follow stop sequence → <b>FINISH:</b> #{finalStop.seq} · {finalStop.stopId}.</span> : <span><b>START:</b> HUB. No valid finish point is available.</span>}
+        <span>#N is the stop sequence; “N orders” means multiple orders at one location.</span>
+        <span>Schematic of de-identified positions, not a street map. Straight lines do not show actual roads.</span>
+        {!finish && stops.length ? <span className="text-warn">FINISH is not shown because the final stop has no valid location or schedule.</span> : null}
         {(["morning", "afternoon", "evening"] as const).map((b) => (
           <span key={b} className="inline-flex items-center gap-1">
             <span className="size-2.5 rounded-full" style={{ background: blockColor(b) }} /> {b}

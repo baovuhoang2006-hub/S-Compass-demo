@@ -6,14 +6,14 @@ import * as React from "react";
 import { BlockTag, CardStatusBadge, ChanceText, EmptyState, MethodBadge, SourceTag, Stat, TYPE_LABEL } from "@/components/bits";
 import { RouteMap } from "@/components/RouteMap";
 import { ShiftRibbon } from "@/components/ShiftRibbon";
-import { InlineStopCardReview, StopCardDialog } from "@/components/StopCardDialog";
+import { StopCardDialog } from "@/components/StopCardDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
 import { Label, Textarea } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { BACKUP_RIDER, fixtures, historical, riderOfShift } from "@/lib/data";
-import { comparePlans, dispatchPlan, generatePlan, selectRider, selectShift, transferParcel } from "@/lib/demoState";
+import { comparePlans, comparisonRunIdFor, dispatchPlan, generatePlan, selectRider, selectShift, transferParcel } from "@/lib/demoState";
 import { metrics } from "@/lib/evidence";
 import { onRoadMinutesPerParcel } from "@/lib/kpi";
 import { METHOD_LABEL } from "@/lib/planner";
@@ -24,6 +24,22 @@ import { useDemo } from "@/state/DemoProvider";
 
 type Filter = "all" | "pending" | "risk" | "done";
 
+function planInputSignature(plan: Plan) {
+  return JSON.stringify({
+    shiftId: plan.shiftId,
+    startMin: plan.startMin,
+    stops: plan.stops,
+    totals: {
+      stops: plan.totals.stops,
+      scheduledStops: plan.totals.scheduledStops,
+      onRoadMin: plan.totals.onRoadMin,
+      endMin: plan.totals.endMin,
+      lowChance: plan.totals.lowChance,
+      flagged: plan.totals.flagged,
+    },
+  });
+}
+
 export default function DispatcherPage() {
   const { state, update, shift, cards, plan } = useDemo();
   const [filter, setFilter] = React.useState<Filter>("all");
@@ -31,7 +47,6 @@ export default function DispatcherPage() {
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
-  const [openCardRow, setOpenCardRow] = React.useState<string | null>(null);
   const [showDetails, setShowDetails] = React.useState(false);
 
   const rider = riderOfShift(shift);
@@ -54,14 +69,19 @@ export default function DispatcherPage() {
     return (buyer?.kind === "confirmed" || buyer?.kind === "changed") && buyer.block !== ps.block;
   }) : [];
   const dispatchBlockReason = openProposal
-    ? "Có đề xuất điều phối đang chờ duyệt. Hãy xử lý trong Replanning trước khi Dispatch."
+    ? "A replanning proposal is waiting. Review it in Replanning before dispatch."
     : staleBuyerStops.length
-      ? `Bản nháp chưa theo khung giờ buyer đã xác nhận cho ${staleBuyerStops.map((s) => s.stopId).join(", ")}. Hãy tạo lại kế hoạch.`
+      ? `The draft does not reflect the buyer-confirmed window for ${staleBuyerStops.map((s) => s.stopId).join(", ")}. Generate a new plan.`
       : null;
   const openComparison = () => {
     update((s) => comparePlans(s));
     setCompareOpen(true);
   };
+  const generateProposedPlan = () => update((s) => comparePlans(generatePlan(s, "rules")));
+  const comparisonCurrent = state.comparisonMeta?.runId === comparisonRunIdFor(state);
+  const baselinePlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "baseline") : undefined;
+  const rulesPlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "rules") : undefined;
+  const projectedImpactReady = !!(draft?.method === "rules" && baselinePlan && rulesPlan && planInputSignature(draft) === planInputSignature(rulesPlan));
 
   const shownRows = shown
     ? shown.stops.filter((ps) => {
@@ -80,7 +100,7 @@ export default function DispatcherPage() {
         <div className="flex flex-wrap items-end gap-4 px-4 py-4">
           <div>
             <label htmlFor="rider" className="text-xs text-ink-faint">
-              Tài xế
+              Rider
             </label>
             <select
               id="rider"
@@ -98,7 +118,7 @@ export default function DispatcherPage() {
           </div>
           <div>
             <label htmlFor="shift" className="text-xs text-ink-faint">
-              Ca giao mẫu
+              Demo shift
             </label>
             <select
               id="shift"
@@ -118,57 +138,66 @@ export default function DispatcherPage() {
             <div className="mt-1 text-xs text-ink-faint">A real rider-day from the dataset, de-identified</div>
           </div>
           <div className="ml-auto flex flex-wrap gap-2">
-            <Button variant="primary" onClick={() => update((s) => generatePlan(s, "rules"))}>
-              <Sparkles /> Tạo kế hoạch đề xuất
+            <Button variant="primary" onClick={generateProposedPlan}>
+              <Sparkles /> Generate Proposed Plan
             </Button>
             <Button onClick={openComparison}>
-              <BarChart3 /> So sánh phương án
+              <BarChart3 /> Compare plans
             </Button>
             {draft ? (
-                <Button variant="dark" disabled={!!dispatchBlockReason} title={dispatchBlockReason ?? "Gửi bản nháp cho rider"} onClick={() => update((s) => dispatchPlan(s, draft))}>
-                <Send /> Dispatch cho rider
+              <Button variant="dark" disabled={!!dispatchBlockReason} title={dispatchBlockReason ?? "Dispatch this draft plan"} onClick={() => update((s) => dispatchPlan(s, draft))}>
+                <Send /> Dispatch to rider
               </Button>
             ) : null}
           </div>
         </div>
         <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-          Rules-based là phương pháp vận hành có bằng chứng hỗ trợ tốt nhất hiện có; Model vẫn là thử nghiệm. Đây là kế hoạch mô phỏng, chưa có kết quả giao thực tế để gọi phương pháp nào là chính xác nhất. <Link href="/how-it-works" className="text-info underline underline-offset-2">Xem cách hoạt động</Link>
+          Rules-based is the best-supported operating method in the current evidence; Model remains experimental. This is a simulated plan, not a measured delivery outcome. <Link href="/how-it-works" className="text-info underline underline-offset-2">How it works</Link>
         </p>
       </Panel>
 
-      {dispatchBlockReason ? <div role="alert" className="rounded-lg border border-warn/50 bg-warn-tint px-4 py-3 text-sm text-warn"><b>Dispatch đang tạm khóa:</b> {dispatchBlockReason}{openProposal ? <Link className="ml-2 underline" href="/replan">Mở Replanning</Link> : null}</div> : null}
+      {dispatchBlockReason ? <div role="alert" className="rounded-lg border border-warn/50 bg-warn-tint px-4 py-3 text-sm text-warn"><b>Dispatch is blocked:</b> {dispatchBlockReason}{openProposal ? <Link className="ml-2 underline" href="/replan">Open Replanning</Link> : null}</div> : null}
 
       {/* Main view keeps operational decisions prominent; reference and session detail stay available below. */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel>
                 <PanelHeader
-            title={shown ? (draft ? "Bản nháp kế hoạch" : "Kế hoạch đã dispatch") : "Chưa tạo kế hoạch"}
-            note={shown ? `${METHOD_LABEL[shown.method]} · Ước tính mô phỏng` : "Tạo kế hoạch đề xuất để xem lịch giao"}
+            title={shown ? (draft ? "Draft plan" : "Dispatched plan") : "No plan yet"}
+            note={shown ? `${METHOD_LABEL[shown.method]} · Simulated estimate` : "Generate a proposed plan to see the schedule"}
             actions={<SourceTag kind="simulated" />}
           />
           {shown ? (
             <div className="grid grid-cols-2 gap-4 px-4 py-3">
-              <Stat label="Đơn đã xếp lịch" value={`${shown.totals.scheduledStops} / ${shown.totals.stops}`} sub="đã xếp / tổng đơn trong kế hoạch" />
-              <Stat label="Giao lần đầu thành công dự kiến" value={`${shown.totals.expectedSuccess.toFixed(1)} / ${shown.totals.estimatedStops}`} sub="Ước tính từ lịch sử · cùng mẫu số so sánh" />
-              <Stat label="Giờ kết thúc dự kiến" value={fmt(shown.totals.endMin)} sub="Ước tính mô phỏng" />
-              <Stat label="Cần chú ý / quyết định chờ" value={`${shown.totals.flagged} / ${pendingCorrections.length + (openProposal ? 1 : 0)}`} sub={`${pendingCount} đơn đang chờ giao`} />
-              {shown.totals.scheduledStops !== shown.totals.stops ? <p className="col-span-2 text-xs text-warn">Chưa xếp lịch {shown.totals.stops - shown.totals.scheduledStops}/{shown.totals.stops} đơn. Chỉ số thời gian mỗi đơn không thể so sánh đầy đủ.</p> : null}
+              <Stat label="Stops scheduled" value={`${shown.totals.scheduledStops} / ${shown.totals.stops}`} sub="scheduled / total pending stops" />
+              <Stat label="Expected successful first attempts" value={`${shown.totals.expectedSuccess.toFixed(1)} / ${shown.totals.estimatedStops}`} sub="Simulated history-table estimate · shared comparison sample" />
+              <Stat label="Estimated finish" value={fmt(shown.totals.endMin)} sub="Simulated estimate" />
+              <Stat label="Attention / decisions waiting" value={`${shown.totals.flagged} / ${pendingCorrections.length + (openProposal ? 1 : 0)}`} sub={`${pendingCount} stops pending`} />
+              {shown.totals.scheduledStops !== shown.totals.stops ? <p className="col-span-2 text-xs text-warn">{shown.totals.stops - shown.totals.scheduledStops} of {shown.totals.stops} stops are unscheduled. Per-parcel time is not comparable.</p> : null}
             </div>
           ) : (
-            <p className="px-4 py-6 text-sm text-ink-faint">Chưa có bản nháp hoặc bản đã dispatch.</p>
+            <p className="px-4 py-6 text-sm text-ink-faint">No draft or dispatched plan yet.</p>
           )}
-          <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Nguồn: lịch sử giao đã ẩn danh · Phương pháp: {shown ? METHOD_LABEL[shown.method] : "chưa chạy"}. <button className="text-info underline" onClick={openComparison}>So sánh phương án</button></p>
+          <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Source: de-identified delivery history · Method: {shown ? METHOD_LABEL[shown.method] : "not run"}. <button className="text-info underline" onClick={openComparison}>View detailed comparison</button></p>
         </Panel>
         <Panel>
-          <PanelHeader title="Tiến độ giao" note="Hoạt động trong phiên demo" actions={<SourceTag kind="live" />} />
-          <div className="px-4 py-3"><Stat label="Stop hoàn tất" value={`${doneCount} / ${shift.stops.length}`} sub={`${shift.stops.filter((s) => states[s.id].status === "delivered").length} thành công · ${shift.stops.filter((s) => states[s.id].status === "failed").length} thất bại`} /></div>
-          <details className="border-t border-line px-4 py-3"><summary className="cursor-pointer font-medium">Hoạt động demo · {m.buyerAnswered} phản hồi · {pendingCorrections.length + (openProposal ? 1 : 0)} quyết định chờ</summary><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Stat label="Buyer replies" value={m.buyerAnswered} sub={`${m.buyerNoResponse} no response`} /><Stat label="Corrections" value={`${m.correctionsApproved} approved`} sub={`${pendingCorrections.length} waiting`} /><Stat label="Plan changes" value={`${m.replansAccepted} accepted`} sub={`${m.replansOverridden} overridden`} /></div></details>
+          <PanelHeader title="Delivery progress" note="Actions in this demo session" actions={<SourceTag kind="live" />} />
+          <div className="px-4 py-3"><Stat label="Stops completed" value={`${doneCount} / ${shift.stops.length}`} sub={`${shift.stops.filter((s) => states[s.id].status === "delivered").length} delivered · ${shift.stops.filter((s) => states[s.id].status === "failed").length} failed`} /></div>
+          <details className="border-t border-line px-4 py-3"><summary className="cursor-pointer font-medium">Demo activity · {m.buyerAnswered} buyer replies · {pendingCorrections.length + (openProposal ? 1 : 0)} decisions waiting</summary><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Stat label="Buyer replies" value={m.buyerAnswered} sub={`${m.buyerNoResponse} no response`} /><Stat label="Corrections" value={`${m.correctionsApproved} approved`} sub={`${pendingCorrections.length} waiting`} /><Stat label="Plan changes" value={`${m.replansAccepted} accepted`} sub={`${m.replansOverridden} overridden`} /></div></details>
         </Panel>
       </div>
 
-      <Panel className="px-4 py-3"><details><summary className="cursor-pointer font-medium">Dữ liệu lịch sử cố định · {historical.orders.toLocaleString()} đơn ({historical.period.from}–{historical.period.to})</summary><div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4"><Stat label="First-attempt success" value={pct(historical.kpis.firstAttemptSuccess, 1)} sub={`Case target ${pct(historical.caseTargets.firstAttemptSuccess)}`} /><Stat label="Re-delivery rate" value={pct(historical.kpis.redeliveryRate, 1)} sub={`Case target ${pct(historical.caseTargets.redeliveryRate, 1)}`} /><Stat label="Evening vs morning" value={`${pct(historical.byWindow.find((w) => w.attempt_time === "evening")!.success)} vs ${pct(historical.byWindow.find((w) => w.attempt_time === "morning")!.success)}`} sub="tỷ lệ giao lần đầu" /><Stat label="Kết quả thực tế của ca này" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "Chưa có kết quả thực tế"} sub={shift.actualDatasetOutcome.attempts ? "lượt giao thực tế trong dữ liệu" : "Ca nhập từ file không có outcome"} /></div></details></Panel>
-      <div className="flex justify-end"><Button variant="outline" aria-expanded={showDetails} onClick={() => setShowDetails((v) => !v)}>{showDetails ? "Ẩn chi tiết" : "Xem chi tiết"}</Button></div>
-      {showDetails ? <Panel className="px-4 py-3"><div className="mb-3 text-sm font-semibold">Chỉ số và giải thích bổ sung</div><div className="grid gap-3 sm:grid-cols-3"><Stat label="Bắt đầu bằng Rules-based" value="Chỉ tạo bản nháp" sub="Không dispatch tự động" /><Stat label="Dữ liệu so sánh" value="Cùng ca, cùng đơn" sub="Xem mẫu số chi tiết trong bảng so sánh" /><Stat label="Model" value="Thử nghiệm" sub="Dự đoán Logistic Regression hiển thị riêng" /></div><p className="mt-3 text-xs text-ink-faint">{state.method === "baseline" ? "Baseline: sắp theo điểm gần nhất, không xét ghi chú/khung giờ." : state.method === "model" ? "Model dùng logistic regression cùng các ràng buộc; kết quả thử nghiệm không chứng minh AI tốt hơn." : "Rules-based: dùng lịch sử theo khung giờ, quy tắc địa điểm đã xác minh, buyer confirmation và giới hạn năng lực ca."} <Link href="/how-it-works" className="text-info underline">Mở giải thích đầy đủ</Link></p></Panel> : null}
+      {projectedImpactReady && baselinePlan && rulesPlan && state.comparisonMeta ? (
+        <ProjectedImpact baseline={baselinePlan} rules={rulesPlan} sampleSize={state.comparisonMeta.eligibleEstimatedStops} totalPending={state.comparisonMeta.totalStops} onDetails={openComparison} />
+      ) : draft ? (
+        <Panel className="border-warn/50 bg-warn-tint/30 px-4 py-3" role="status">
+          <p className="text-sm font-medium">Projected Impact is out of date.</p>
+          <p className="mt-1 text-xs text-ink-soft">The rider, stops, buyer commitments or draft changed. Generate a new proposed plan to refresh the comparison.</p>
+        </Panel>
+      ) : null}
+
+      <Panel className="px-4 py-3"><details><summary className="cursor-pointer font-medium">Fixed historical data · {historical.orders.toLocaleString()} orders ({historical.period.from}–{historical.period.to})</summary><div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4"><Stat label="First-attempt success" value={pct(historical.kpis.firstAttemptSuccess, 1)} sub={`Case target ${pct(historical.caseTargets.firstAttemptSuccess)}`} /><Stat label="Re-delivery rate" value={pct(historical.kpis.redeliveryRate, 1)} sub={`Case target ${pct(historical.caseTargets.redeliveryRate, 1)}`} /><Stat label="Evening vs morning" value={`${pct(historical.byWindow.find((w) => w.attempt_time === "evening")!.success)} vs ${pct(historical.byWindow.find((w) => w.attempt_time === "morning")!.success)}`} sub="first-attempt success" /><Stat label="Actual result for this rider-day" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "No actual outcome available"} sub={shift.actualDatasetOutcome.attempts ? "actual delivery attempts in dataset" : "Imported rider-day has no outcome"} /></div></details></Panel>
+      <div className="flex justify-end"><Button variant="outline" aria-expanded={showDetails} onClick={() => setShowDetails((v) => !v)}>{showDetails ? "Hide details" : "View details"}</Button></div>
+      {showDetails ? <Panel className="px-4 py-3"><div className="mb-3 text-sm font-semibold">Additional measures and explanation</div><div className="grid gap-3 sm:grid-cols-3"><Stat label="Default method" value="Rules-based" sub="Creates a draft only; never dispatches automatically" /><Stat label="Comparison input" value="Same shift and stops" sub="See the detailed denominator in Compare Plans" /><Stat label="Model" value="Experimental" sub="Logistic Regression predictions are reported separately" /></div><p className="mt-3 text-xs text-ink-faint">{state.method === "baseline" ? "Baseline follows the nearest map pin without considering site notes or receiving windows." : state.method === "model" ? "Model uses logistic regression with the same constraints; experimental predictions are not measured outcomes." : "Rules-based uses historical success by time window, verified site rules, buyer confirmations and block capacity."} <Link href="/how-it-works" className="text-info underline">Read the full explanation</Link></p></Panel> : null}
 
       {openProposal || pendingCorrections.length ? (
         <div className="flex flex-wrap gap-3">
@@ -188,7 +217,7 @@ export default function DispatcherPage() {
       <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
         <Panel className="min-w-0">
                 <PanelHeader
-            title="Đơn giao hàng"
+            title="Deliveries"
             note={
               shown
                 ? `${shown.stops.length} assigned · ${pendingCount} pending · ${riskCount} at risk${transferred.length ? ` · ${transferred.length} moved to the backup rider` : ""}`
@@ -214,12 +243,12 @@ export default function DispatcherPage() {
                     onClick={() => setFilter(f)}
                     className={cn("rounded-md px-2.5 py-1 text-sm", filter === f ? "bg-canvas font-medium text-ink" : "text-ink-soft hover:text-ink")}
                   >
-                    {f === "all" ? "Tất cả" : f === "pending" ? "Đang giao" : f === "risk" ? `Cần chú ý (${riskCount})` : "Hoàn tất"}
+                    {f === "all" ? "All" : f === "pending" ? "Pending" : f === "risk" ? `At risk (${riskCount})` : "Done"}
                   </button>
                 ))}
               </div>
               <div className="max-h-[760px] overflow-auto">
-                <p className="px-3 py-1 text-xs text-ink-faint sm:hidden">Vuốt ngang bảng để xem đủ thông tin từng đơn.</p>
+                <p className="px-3 py-1 text-xs text-ink-faint sm:hidden">Swipe horizontally to see all order details.</p>
                 <table className="w-full min-w-[820px] text-sm">
                   <thead className="sticky top-0 z-[1] bg-surface text-left text-xs text-ink-faint">
                     <tr className="border-b border-line">
@@ -243,7 +272,6 @@ export default function DispatcherPage() {
                       const ss = states[ps.stopId];
                       const buyer = ss.buyer;
                       return (
-                        <React.Fragment key={ps.stopId}>
                         <tr
                           key={ps.stopId}
                           className={cn("border-b border-line/70 align-top hover:bg-canvas/60", selected === ps.stopId && "bg-brand-tint/50")}
@@ -260,10 +288,10 @@ export default function DispatcherPage() {
                               className="text-left font-medium text-info underline-offset-2 hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setOpenCardRow(openCardRow === ps.stopId ? null : ps.stopId);
+                                setCardOpen({ key: st.locationKey, stopId: ps.stopId });
                               }}
                             >
-                              {card.name} · {openCardRow === ps.stopId ? "Ẩn Stop Card" : "Xem/Duyệt Stop Card"}
+                              {card.name}
                             </button>
                             <div className="text-xs text-ink-faint">
                               {TYPE_LABEL[st.locationType]} · {st.parcel}
@@ -298,8 +326,8 @@ export default function DispatcherPage() {
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-right">
-                            <Button size="sm" variant={openCardRow === ps.stopId ? "primary" : "outline"} onClick={(e) => { e.stopPropagation(); setOpenCardRow(openCardRow === ps.stopId ? null : ps.stopId); }}>
-                              {openCardRow === ps.stopId ? "Đóng card" : "Xem/Duyệt Stop Card"}
+                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelected(ps.stopId); setCardOpen({ key: st.locationKey, stopId: ps.stopId }); }}>
+                              Review Stop Card
                             </Button>
                             {ss.status === "pending" && !draft && plan ? (
                               <Button
@@ -316,8 +344,6 @@ export default function DispatcherPage() {
                             ) : null}
                           </td>
                         </tr>
-                        {openCardRow === ps.stopId ? <tr><td colSpan={9} className="p-0"><InlineStopCardReview cardKey={st.locationKey} stopId={ps.stopId} /></td></tr> : null}
-                        </React.Fragment>
                       );
                     })}
                   </tbody>
@@ -338,11 +364,11 @@ export default function DispatcherPage() {
                 title="No plan for this shift yet"
                 action={
                   <Button variant="primary" onClick={() => update((s) => generatePlan(s, "rules"))}>
-                    <Sparkles /> Tạo kế hoạch đề xuất
+                    <Sparkles /> Generate Proposed Plan
                   </Button>
                 }
               >
-                {shift.stops.length} parcels are loaded for {rider.label}. Generate a plan, compare the three methods, then dispatch one to the rider.
+                {shift.stops.length} parcels are loaded for {rider.label}. Generate a proposed plan, compare methods, then dispatch it to the rider.
               </EmptyState>
               <ul className="mt-4 grid gap-1 text-sm sm:grid-cols-2">
                 {shift.stops.map((s) => (
@@ -362,17 +388,17 @@ export default function DispatcherPage() {
 
         <div className="min-w-0 space-y-5">
           <Panel>
-            <PanelHeader title="Lịch trình ca giao" note="Mỗi dấu là một stop theo giờ đến mô phỏng" actions={<SourceTag kind="simulated" />} />
+            <PanelHeader title="Shift timeline" note="Each mark is a stop at its simulated arrival time" actions={<SourceTag kind="simulated" />} />
             <div className="px-4 py-3">
               {shown ? (
                 <ShiftRibbon plan={shown} states={states} clockMin={plan ? state.clockMin[shift.id] : undefined} onSelect={setSelected} selected={selected} />
               ) : (
-                <p className="text-sm text-ink-faint">Hiện sau khi tạo kế hoạch.</p>
+                <p className="text-sm text-ink-faint">Appears after you generate a plan.</p>
               )}
             </div>
           </Panel>
           <Panel>
-            <PanelHeader title="Sơ đồ tuyến" note="Chọn một điểm để làm nổi bật đơn tương ứng" />
+            <PanelHeader title="Route" note="Select a point to highlight the matching delivery" />
             <div className="px-4 py-3">
               <RouteMap riderId={rider.id} plan={shown} states={states} selected={selected} onSelect={setSelected} />
             </div>
@@ -398,6 +424,63 @@ export default function DispatcherPage() {
       <TransferDialog stopId={transferStop} riderName={rider.label} onClose={() => setTransferStop(null)} onConfirm={(note) => transferStop && update((s) => transferParcel(s, transferStop, note))} />
     </div>
   );
+}
+
+function signed(value: number, digits = 1) {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}`;
+}
+
+function ProjectedImpact({ baseline, rules, sampleSize, totalPending, onDetails }: { baseline: Plan; rules: Plan; sampleSize: number; totalPending: number; onDetails: () => void }) {
+  const baselineMinutes = onRoadMinutesPerParcel(baseline);
+  const rulesMinutes = onRoadMinutesPerParcel(rules);
+  const minutesComparable = baselineMinutes !== null && rulesMinutes !== null && baseline.totals.stops === rules.totals.stops;
+  const finishComparable = baseline.totals.stops === rules.totals.stops && baseline.totals.scheduledStops === baseline.totals.stops && rules.totals.scheduledStops === rules.totals.stops;
+  const successDelta = rules.totals.expectedSuccess - baseline.totals.expectedSuccess;
+  const successPercent = baseline.totals.expectedSuccess > 0 ? (successDelta / baseline.totals.expectedSuccess) * 100 : null;
+  const minutesDelta = minutesComparable ? rulesMinutes! - baselineMinutes! : null;
+  const minutesPercent = minutesComparable && baselineMinutes! > 0 ? (minutesDelta! / baselineMinutes!) * 100 : null;
+  const finishDelta = rules.totals.endMin - baseline.totals.endMin;
+  const lowChanceDelta = rules.totals.lowChance - baseline.totals.lowChance;
+  const scheduledComparable = baseline.totals.stops === rules.totals.stops;
+  const relative = (v: number | null) => v === null ? "" : ` (${signed(v)}%)`;
+  const stopTimeReason = !scheduledComparable
+    ? `Pending-stop totals differ (${baseline.totals.stops} vs ${rules.totals.stops}).`
+    : `Not comparable: Baseline has ${baseline.totals.stops - baseline.totals.scheduledStops} unscheduled and Rules-based has ${rules.totals.stops - rules.totals.scheduledStops} unscheduled stops.`;
+  return <Panel className="overflow-hidden">
+    <PanelHeader title="Projected Impact — Simulated Estimates" note="Projected plan comparison" actions={<SourceTag kind="simulated" />} />
+    <p className="px-4 pt-3 text-sm text-ink-soft">Comparison uses the same rider, parcels and historical success scorer. Results are simulated estimates, not measured delivery outcomes.</p>
+    <div className="grid gap-3 p-4 md:grid-cols-2">
+      <div className="rounded-lg border border-line bg-canvas/60 p-4">
+        <h3 className="font-semibold">Before · Baseline</h3>
+        <ImpactMetrics plan={baseline} minutes={baselineMinutes} />
+      </div>
+      <div className="rounded-lg border border-brand/40 bg-brand-tint/30 p-4">
+        <h3 className="font-semibold text-brand-ink">After · S-Compass Rules-based</h3>
+        <ImpactMetrics plan={rules} minutes={rulesMinutes} />
+      </div>
+    </div>
+    <div className="grid gap-x-5 gap-y-2 border-t border-line px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+      <p><span className="text-ink-faint">Expected first attempts:</span> <b className={successDelta > 0 ? "text-ok" : ""}>{signed(successDelta)} stops{relative(successPercent)}</b></p>
+      <p><span className="text-ink-faint">Minutes per parcel:</span> {minutesComparable ? <b className={minutesDelta! < 0 ? "text-ok" : ""}>{signed(minutesDelta!)} min{relative(minutesPercent)}</b> : <b title={stopTimeReason}>Not comparable</b>}</p>
+      <p><span className="text-ink-faint">Estimated finish:</span> {finishComparable ? <b className={finishDelta < 0 ? "text-ok" : ""}>{finishDelta === 0 ? "No change" : `${Math.round(Math.abs(finishDelta))} min ${finishDelta < 0 ? "earlier" : "later"}`}</b> : <b title={stopTimeReason}>Not comparable</b>}</p>
+      <p><span className="text-ink-faint">Low-chance stops:</span> <b className={lowChanceDelta < 0 ? "text-ok" : ""}>{lowChanceDelta === 0 ? "No change" : `${Math.abs(lowChanceDelta)} ${lowChanceDelta < 0 ? "fewer" : "more"} stops`}</b></p>
+    </div>
+    {!minutesComparable ? <p role="status" className="px-4 pb-3 text-xs text-warn">{stopTimeReason} Per-parcel time is shown as Not comparable when any pending stop is unscheduled or denominators differ.</p> : null}
+    <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-ink-faint">
+      <span>Sample: {totalPending} total pending stops · {sampleSize} common eligible estimates. Baseline and Rules use the same start conditions.</span>
+      <Button variant="outline" onClick={onDetails}><BarChart3 /> View Detailed Comparison</Button>
+    </div>
+  </Panel>;
+}
+
+function ImpactMetrics({ plan, minutes }: { plan: Plan; minutes: number | null }) {
+  return <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-3 text-sm">
+    <div><dt className="text-xs text-ink-faint">Expected successful first attempts</dt><dd className="font-semibold">{plan.totals.expectedSuccess.toFixed(1)} / {plan.totals.estimatedStops}</dd></div>
+    <div><dt className="text-xs text-ink-faint">Estimated minutes per parcel</dt><dd className="font-semibold">{minutes === null ? "Not comparable" : `${minutes.toFixed(1)} min`}</dd></div>
+    <div><dt className="text-xs text-ink-faint">Estimated finish</dt><dd className="font-semibold">{plan.totals.scheduledStops === plan.totals.stops ? fmt(plan.totals.endMin) : "Not comparable"}</dd></div>
+    <div><dt className="text-xs text-ink-faint">Stops at low-chance times</dt><dd className="font-semibold">{plan.totals.lowChance}</dd></div>
+    <div className="col-span-2"><dt className="text-xs text-ink-faint">Stops scheduled / total pending</dt><dd className="font-semibold">{plan.totals.scheduledStops} / {plan.totals.stops}</dd></div>
+  </dl>;
 }
 
 function SelectedStop({ ps, onOpen }: { ps?: PlannedStop; onOpen: () => void }) {
