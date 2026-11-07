@@ -246,10 +246,6 @@ export default function IntakePage() {
             </div>
           </Panel>
 
-          <Panel>
-            <PanelHeader title="Rider-day Warnings" note="These apply to the full rider-day, separately from individual order issues." />
-            <div className="space-y-2 p-4 text-sm">{batch.shiftInfo.some((shift) => shift.heavy) ? batch.shiftInfo.filter((shift) => shift.heavy).map((shift) => <div key={shift.shiftId} className="rounded-lg border border-warn/30 bg-warn-tint p-3"><Badge tone="warn">Accepted with warning</Badge><p className="mt-2 font-semibold">{shift.riderLabel.replace(/^Imported · /, "")} · {shift.date} · {shift.parcels} eligible parcels</p><p className="mt-1 text-ink-soft">Above the {HEAVY_DAY_PARCELS}-parcel demo threshold. Review scheduling in Dispatcher; any transfer to a backup rider requires an explicit dispatcher action. Individual row statuses are unchanged.</p></div>) : <p className="text-ink-soft">No rider-day capacity warnings.</p>}</div>
-          </Panel>
           <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
             <Panel className="min-w-0">
               <PanelHeader
@@ -308,16 +304,26 @@ export default function IntakePage() {
               <PanelHeader title={isActive ? "Imported Rider-days" : "Rider-days Ready to Import"} note={isActive ? "Choose the rider-day to review in Dispatcher." : "Preview only. Import explicitly to enable planning."} />
               <ul className="max-h-[560px] divide-y divide-line overflow-auto">
                 {batch.shiftInfo.map((x) => (
-                  <li key={x.shiftId} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm">
-                    <div>
-                      <div className="break-words text-base font-semibold">{x.riderLabel.replace(/^Imported · /, "")}</div>
-                      <div className="text-xs text-ink-faint">
-                        {x.weekday} {x.date}<div className="mt-1 text-sm font-medium text-ink">{x.parcels} eligible parcels</div>{x.heavy ? <Badge tone="warn">Capacity review</Badge> : <Badge tone="ok">No capacity warning</Badge>}
+                  <li key={x.shiftId} className="space-y-3 px-4 py-4 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="break-words text-base font-semibold">{x.riderLabel.replace(/^Imported · /, "")}</div>
+                        <div className="text-xs text-ink-faint">{x.weekday} {x.date}</div>
+                        <div className="mt-1 font-medium">{x.parcels} eligible parcels</div>
+                        {!x.heavy ? <Badge tone="ok">No capacity warning</Badge> : null}
                       </div>
+                      <Button size="sm" className="shrink-0" onClick={() => open(x.shiftId)} disabled={!isActive}>
+                        Open in Dispatcher
+                      </Button>
                     </div>
-                    <Button size="sm" className="shrink-0" onClick={() => open(x.shiftId)} disabled={!isActive}>
-                      Open in Dispatcher
-                    </Button>
+                    {x.heavy ? <div className="rounded-lg border border-warn/30 bg-warn-tint p-3">
+                      <Badge tone="warn">Capacity review</Badge>
+                      <p className="mt-2 text-sm">This rider-day has {x.parcels} parcels, above the {HEAVY_DAY_PARCELS}-parcel demo warning threshold. This is a rider-day warning, not an individual order quarantine.</p>
+                      <details className="ui-disclosure mt-2 text-sm">
+                        <summary className="w-fit cursor-pointer font-medium text-info">Warning details</summary>
+                        <p className="pt-2 text-ink-soft">Review scheduling in Dispatcher; any transfer to a backup rider requires an explicit dispatcher action. Individual row statuses and parcel eligibility are unchanged. Orders are not automatically reassigned.</p>
+                      </details>
+                    </div> : null}
                   </li>
                 ))}
                 {batch.shiftInfo.length === 0 ? <li className="px-4 py-6 text-center text-sm text-ink-faint">No rider-day could be built: every row was quarantined.</li> : null}
