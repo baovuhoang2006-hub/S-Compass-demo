@@ -3,7 +3,7 @@
 import { CheckCircle2, ChevronDown, Clock, DoorOpen, FileText, Flag, MapPin, Navigation, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
-import { BlockTag, ChanceText, EmptyState, SourceTag, TYPE_LABEL } from "@/components/bits";
+import { BlockTag, CardStatusBadge, ChanceText, EmptyState, SourceTag, TYPE_LABEL } from "@/components/bits";
 import { ProposalReview } from "@/components/ProposalReview";
 import { StopCardDialog } from "@/components/StopCardDialog";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Label, Select, Textarea } from "@/components/ui/field";
 import { riderOfShift } from "@/lib/data";
 import { recordOutcome, reportEntranceClosed, reportOtherIssue } from "@/lib/demoState";
-import { blockInfo, fmt } from "@/lib/time";
+import { blockInfo, blockLabel, fmt } from "@/lib/time";
 import type { PlannedStop } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
@@ -52,17 +52,20 @@ export default function RiderPage() {
   const later = remaining.filter((s) => s !== next);
   const nextStop = next ? stopById[next.stopId] : null;
   const nextCard = nextStop ? cards[nextStop.locationKey] : null;
+  const nextBuyer = next ? states[next.stopId]?.buyer : undefined;
+  const pickup = nextBuyer?.kind === "pickup" ? riderOfShift(shift).pickupPoints.find((p) => p.id === nextBuyer.pickupId) : undefined;
+  const pendingDisputes = state.corrections.filter((c) => c.locationKey === nextStop?.locationKey && c.field === "dispute" && c.status === "pending");
 
   return (
-    <div className="mx-auto max-w-md space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="mx-auto w-full max-w-md space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 break-words">
           <h1 className="text-lg font-semibold leading-6">{riderOfShift(shift).label}</h1>
           <p className="text-sm text-ink-faint">
             {riderOfShift(shift).zoneLabel} · {shift.weekday} {shift.date} · {done.length}/{plan.stops.length} done
           </p>
         </div>
-        <div className="text-right">
+        <div className="shrink-0 text-right">
           <div className="flex items-center gap-1 text-lg font-semibold">
             <Clock className="size-4 text-ink-faint" /> {fmt(state.clockMin[shift.id])}
           </div>
@@ -80,67 +83,63 @@ export default function RiderPage() {
       ) : null}
 
       {next && nextStop && nextCard ? (
-        <section className="overflow-hidden rounded-xl border border-line bg-surface" aria-labelledby="next-stop">
-          <div className="flex items-center justify-between bg-ink px-4 py-2 text-white">
-            <span id="next-stop" className="text-sm font-semibold">
-              Next stop · #{next.seq}
-            </span>
-            <span className="text-xs opacity-80">{next.stopId}</span>
+        <section data-rider-next className="overflow-hidden rounded-xl border border-line bg-surface" aria-labelledby="next-stop">
+          <div className="flex items-start justify-between gap-3 bg-ink px-4 py-2.5 text-white">
+            <h2 id="next-stop" className="shrink-0 text-xs font-semibold tracking-wide">NEXT DELIVERY · STOP #{next.seq}</h2>
+            <span className="min-w-0 break-all text-right text-xs" aria-label="Order ID">{nextStop.id}</span>
           </div>
           <div className="space-y-3 p-4">
-            <div>
-              <p className="text-xl font-semibold leading-7">{nextCard.name}</p>
-              <p className="text-sm text-ink-soft">
-                {nextStop.buyer} · {TYPE_LABEL[nextStop.locationType]} · {nextStop.parcel}
-                {nextStop.payment === "cod" ? " · collect cash (COD)" : ""}
-              </p>
+            <div className="min-w-0 space-y-1">
+              <h3 className="break-words text-2xl font-semibold leading-7">{nextCard.name}</h3>
+              <p className="break-words text-sm"><span className="text-ink-soft">Recipient: </span>{nextStop.buyer}</p>
+              <p className="text-xs text-ink-faint">{TYPE_LABEL[nextStop.locationType]} · {nextStop.parcel}{nextStop.isReattempt ? " · Re-attempt" : ""}</p>
+              <p className="text-xs text-ink-faint">{next.pointSource === "pickup point" ? "Buyer-selected demo pickup point; no street navigation" : next.point ? "Anonymized position; street address not available" : "Location missing — ask Dispatcher before travelling"}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-3 text-sm">
+
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
               <BlockTag block={next.block} />
-              <span className="text-ink-soft">
-                ETA {fmt(next.arriveMin)} <span className="text-xs text-ink-faint">(simulated)</span>
-              </span>
-              <span>
-                Chance <ChanceText p={next.p} />
-              </span>
+              <p><span className="font-semibold">ETA {fmt(next.arriveMin)}</span> <span className="text-xs text-ink-soft">(simulated)</span></p>
             </div>
-            <div className="space-y-1.5 rounded-lg bg-canvas p-3 text-sm">
-              <p className="flex gap-2">
-                <DoorOpen className="mt-0.5 size-4 shrink-0 text-ink-faint" />
-                <span>
-                  {next.pointSource === "pickup point" ? "Deliver to the pickup point chosen by the buyer" : nextCard.entrance}
-                  {nextCard.temporaryClosure ? <span className="block text-bad">{nextCard.temporaryClosure.text}</span> : null}
-                </span>
-              </p>
-              <p className="flex gap-2">
-                <MapPin className="mt-0.5 size-4 shrink-0 text-ink-faint" />
-                <span>{nextCard.handover}</span>
-              </p>
+            {nextBuyer?.kind === "confirmed" || nextBuyer?.kind === "changed" ? <p className="text-sm text-ok">Buyer confirmed: {blockLabel(nextBuyer.block)}</p> : null}
+            <div className={cn("rounded-lg px-3 py-2 text-sm", nextStop.payment === "cod" ? "bg-warn-tint text-warn" : "bg-canvas text-ink-soft")}>
+              <p className="font-semibold">{nextStop.payment === "cod" ? "COD · Collect cash" : "Prepaid"}</p>
+              {nextStop.payment === "cod" ? <p className="mt-0.5 text-xs">Amount not provided in source data.</p> : null}
             </div>
-            <div>
-              <p className="mb-1 text-xs font-medium text-ink-faint">Why this stop now</p>
-              <ul className="list-disc space-y-1 pl-5 text-sm text-ink-soft">
-                {next.reasons.slice(0, 3).map((r) => (
-                  <li key={r}>{r}</li>
-                ))}
-              </ul>
-              {next.flags.map((f) => (
-                <p key={f} className="mt-1 flex gap-1 text-sm text-bad">
-                  <TriangleAlert className="mt-0.5 size-4 shrink-0" /> {f}
-                </p>
-              ))}
+
+            <div className="space-y-2 rounded-lg border border-line bg-canvas/50 p-3 text-sm">
+              <div className="flex flex-wrap items-center gap-2"><span className="text-xs font-medium text-ink-soft">Site instructions</span><CardStatusBadge status={nextCard.status} /></div>
+              <p className="text-xs text-ink-soft">{nextCard.status === "suggested" || nextCard.status === "unverified" ? "Not verified · dataset guidance" : nextCard.status === "disputed" ? "Disputed · consult Dispatcher" : nextCard.source.startsWith("Demo fixture") ? "Verified demo fixture · not a field inspection" : "Reviewed in demo · check each rule's status"}</p>
+              <dl className="space-y-2">
+                <div className="flex gap-2"><DoorOpen className="mt-0.5 size-4 shrink-0 text-ink-faint" /><div className="min-w-0"><dt className="text-xs text-ink-soft">Entrance</dt><dd className="break-words">{next.pointSource === "pickup point" ? `Deliver to ${pickup?.name ?? "the pickup point chosen by the buyer"}` : nextCard.entrance}</dd></div></div>
+                <div className="flex gap-2"><MapPin className="mt-0.5 size-4 shrink-0 text-ink-faint" /><div className="min-w-0"><dt className="text-xs text-ink-soft">Handover</dt><dd className="break-words">{next.pointSource === "pickup point" ? "Follow the buyer's pickup arrangement; site handover instructions may not apply." : nextCard.handover}</dd></div></div>
+              </dl>
+              {nextCard.restrictions.length || nextCard.access.length || nextCard.receivingWindows.length ? <div className="border-t border-line pt-2">
+                <p className="mb-1 text-xs font-medium text-ink-soft">Site access &amp; receiving rules{next.pointSource === "pickup point" ? " (original site)" : ""}</p>
+                <ul className="space-y-1.5 break-words">
+                  {nextCard.restrictions.filter((r) => r.code !== "temporary_closure").map((r) => <li key={r.code + r.text}>{r.text} <span className={cn("text-xs", r.strength === "hard" ? "text-ok" : "text-warn")}>· {r.strength === "hard" ? "Approved rule" : "Unverified suggestion"}</span></li>)}
+                  {nextCard.receivingWindows.filter((text) => !nextCard.restrictions.some((r) => r.text === text)).map((text, i) => <li key={`window-${i}`}>{text} <span className="text-xs text-ink-soft">· Site note; see Stop Card for source</span></li>)}
+                  {nextCard.access.map((text, i) => <li key={`${i}-${text}`}>{text}</li>)}
+                </ul>
+              </div> : null}
             </div>
-            <div className="grid grid-cols-3 gap-2">
-              <Button variant="outline" className="h-auto flex-col py-2 text-xs" onClick={() => setCard({ key: nextStop.locationKey, stopId: next.stopId })}>
-                <FileText /> Open stop card
-              </Button>
-              <Button variant="outline" className="h-auto flex-col py-2 text-xs" onClick={() => setIssueFor(next)}>
-                <Flag /> Report issue
-              </Button>
-              <Button variant="primary" className="h-auto flex-col py-2 text-xs" onClick={() => setOutcomeFor(next)}>
-                <CheckCircle2 /> Record outcome
-              </Button>
+
+            {nextCard.temporaryClosure ? <p role="alert" className="flex gap-2 rounded-lg bg-bad-tint p-3 text-sm text-bad"><TriangleAlert className="mt-0.5 size-4 shrink-0" /><span className="break-words">{nextCard.temporaryClosure.text}</span></p> : null}
+            {nextCard.status === "disputed" || pendingDisputes.length ? <div role="alert" className="rounded-lg bg-bad-tint p-3 text-sm text-bad"><p className="font-medium">Site information disputed — consult Dispatcher before following it.</p>{pendingDisputes.map((c) => <p key={c.id} className="mt-1 break-words">Pending review: {c.text}</p>)}{state.overlays[nextCard.key]?.disputeReason ? <p className="mt-1 break-words">{state.overlays[nextCard.key].disputeReason}</p> : null}</div> : null}
+            {next.flags.length ? <ul aria-label="Delivery warnings" className="space-y-2">{next.flags.map((f) => <li key={f} className="flex gap-2 rounded-lg bg-bad-tint p-3 text-sm text-bad"><TriangleAlert className="mt-0.5 size-4 shrink-0" /><span className="break-words">{f}</span></li>)}</ul> : null}
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" className="h-auto min-h-11 px-2 py-2" onClick={() => setCard({ key: nextStop.locationKey, stopId: next.stopId })}><FileText /> Open Stop Card</Button>
+              <Button variant="outline" className="h-auto min-h-11 px-2 py-2" onClick={() => setIssueFor(next)}><Flag /> Report Issue</Button>
+              <Button variant="primary" className="col-span-2 min-h-12" onClick={() => setOutcomeFor(next)}><CheckCircle2 /> Record Delivery Outcome</Button>
             </div>
+            <details key={next.stopId} className="rounded-lg border border-line p-3">
+              <summary className="-m-3 min-h-11 cursor-pointer p-3 text-sm font-medium">Why this stop?</summary>
+              <div className="mt-3 space-y-2 text-sm text-ink-soft">
+                <p>Estimated chance: <ChanceText p={next.p} /></p>
+                <p className="text-xs">History-table estimate (simulated), not a guaranteed result. Model predictions, when used, are reported separately in Dispatcher comparison.</p>
+                <ul className="list-disc space-y-1 break-words pl-5">{next.reasons.map((r, i) => <li key={`${i}-${r}`}>{r}</li>)}</ul>
+              </div>
+            </details>
           </div>
         </section>
       ) : (
@@ -192,8 +191,8 @@ export default function RiderPage() {
           {showDone ? (
             <ul className="border-t border-line">
               {done.map((s) => (
-                <li key={s.stopId} className="flex justify-between px-4 py-2 text-sm">
-                  <span>
+                <li key={s.stopId} className="flex items-start justify-between gap-3 px-4 py-2 text-sm">
+                  <span className="min-w-0 break-words">
                     {s.stopId} · {cards[stopById[s.stopId].locationKey].name}
                   </span>
                   <Badge tone={states[s.stopId].status === "delivered" ? "ok" : "bad"}>{states[s.stopId].status}</Badge>
@@ -230,7 +229,7 @@ function OutcomeDialog({ stop, onClose }: { stop: PlannedStop | null; onClose: (
         <fieldset className="grid grid-cols-2 gap-2">
           <legend className="sr-only">Outcome</legend>
           {(["delivered", "failed"] as const).map((r) => (
-            <label key={r} className={cn("cursor-pointer rounded-lg border p-3 text-center text-sm font-medium", result === r ? (r === "delivered" ? "border-ok bg-ok-tint text-ok" : "border-bad bg-bad-tint text-bad") : "border-line")}>
+            <label key={r} className={cn("cursor-pointer rounded-lg border p-3 text-center text-sm font-medium focus-within:ring-2 focus-within:ring-info", result === r ? (r === "delivered" ? "border-ok bg-ok-tint text-ok" : "border-bad bg-bad-tint text-bad") : "border-line")}>
               <input type="radio" name="outcome" className="sr-only" checked={result === r} onChange={() => setResult(r)} />
               {r === "delivered" ? "Delivered" : "Not delivered"}
             </label>
