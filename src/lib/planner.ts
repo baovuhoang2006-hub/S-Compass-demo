@@ -1,5 +1,5 @@
 import { allPickupPoints, riderOfShift } from "./data";
-import { predict } from "./model";
+import { checkedPredict, type ModelInput } from "./model";
 import { tableP } from "./successTable";
 import { BLOCKS, SHIFT_END, SHIFT_START, blockInfo, blockLabel, blockOfTime, fmt } from "./time";
 import type {
@@ -110,6 +110,15 @@ function blockHistory(card: StopCard, block: Block) {
   return { attempts: a.attempts + b.attempts, delivered: a.delivered + b.delivered };
 }
 
+export function modelInputFor(stop: FixtureStop, shift: Shift, card: StopCard, block: Block): ModelInput {
+  return {
+    locType: stop.locationType, block, weekend: shift.isWeekend, payment: stop.payment,
+    parcel: stop.parcel, hasPin: stop.pin !== null, serviceMin: stop.serviceMinutes,
+    isReattempt: stop.isReattempt, locHistory: locationHistory(card),
+    locBlockHistory: blockHistory(card, block),
+  };
+}
+
 function buildCandidate(stop: FixtureStop, ctx: PlanContext): Candidate {
   const card = ctx.cards[stop.locationKey];
   const state = ctx.stopStates[stop.id];
@@ -195,20 +204,12 @@ function buildCandidate(stop: FixtureStop, ctx: PlanContext): Candidate {
   const pModelByBlock = {} as Record<Block, number | null>;
   for (const b of BLOCKS.map((x) => x.id)) {
     pByBlock[b] = pickup ? null : tableP(stop.locationType, b, dayType(ctx.shift), stop.payment).p;
-    pModelByBlock[b] = pickup
-      ? null
-      : predict({
-          locType: stop.locationType,
-          block: b,
-          weekend,
-          payment: stop.payment,
-          parcel: stop.parcel,
-          hasPin: stop.pin !== null,
-          serviceMin: stop.serviceMinutes,
-          isReattempt: stop.isReattempt,
-          locHistory: locationHistory(card),
-          locBlockHistory: blockHistory(card, b),
-        });
+    if (pickup) pModelByBlock[b] = null;
+    else {
+      const prediction = checkedPredict(modelInputFor(stop, ctx.shift, card, b));
+      pModelByBlock[b] = prediction.p;
+      if (method === "model" && prediction.reason) flags.push(`Model output rejected for ${b}: ${prediction.reason}. History-table fallback; dispatcher review required.`);
+    }
   }
 
   return {
@@ -231,7 +232,7 @@ function buildCandidate(stop: FixtureStop, ctx: PlanContext): Candidate {
 }
 
 function scoreFor(c: Candidate, b: Block, method: PlanMethod): number {
-  const p = method === "model" ? c.pModelByBlock[b] : c.pByBlock[b];
+  const p = method === "model" ? (c.pModelByBlock[b] ?? c.pByBlock[b]) : c.pByBlock[b];
   return p ?? 0.5; // pickup points: no estimate; neutral score keeps geography-based choice
 }
 

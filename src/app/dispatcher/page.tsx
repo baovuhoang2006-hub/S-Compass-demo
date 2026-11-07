@@ -15,6 +15,7 @@ import { Panel, PanelHeader } from "@/components/ui/panel";
 import { BACKUP_RIDER, fixtures, historical, riderOfShift } from "@/lib/data";
 import { comparePlans, dispatchPlan, generatePlan, selectRider, selectShift, transferParcel } from "@/lib/demoState";
 import { metrics } from "@/lib/evidence";
+import { onRoadMinutesPerParcel } from "@/lib/kpi";
 import { METHOD_LABEL } from "@/lib/planner";
 import { fmt } from "@/lib/time";
 import type { Plan, PlanMethod, PlannedStop } from "@/lib/types";
@@ -453,7 +454,7 @@ function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
   const rows: { label: string; get: (p: Plan) => string; note?: string }[] = [
     { label: "Expected successful first attempts", get: (p) => p.totals.expectedSuccess.toFixed(1), note: "History-table estimate, same scorer for every method" },
     { label: "Stops with an estimate", get: (p) => `${p.totals.estimatedStops} / ${p.totals.stops}` },
-    { label: "Estimated on-road minutes per parcel", get: (p) => `${(p.totals.stops ? p.totals.onRoadMin / p.totals.stops : 0).toFixed(1)} min (${p.totals.scheduledStops} scheduled / ${p.totals.stops} total)` },
+    { label: "Estimated on-road minutes per parcel", get: (p) => onRoadMinutesPerParcel(p) === null ? `Not comparable: ${p.totals.stops - p.totals.scheduledStops} unscheduled / ${p.totals.stops} total` : `${onRoadMinutesPerParcel(p)!.toFixed(1)} min (${p.totals.stops} parcels)`, note: "Only shown when every pending parcel has a scheduled time" },
     { label: "Model prediction (experimental)", get: (p) => p.totals.modelExpectedSuccess === null ? "Not scored" : `${p.totals.modelExpectedSuccess.toFixed(1)} / ${p.totals.modelEstimatedStops} stops`, note: "Logistic regression prediction; not the common comparison score" },
     { label: "Stops in a block with under 65% chance", get: (p) => String(p.totals.lowChance), note: "e.g. schools and offices in the evening" },
     { label: "Distance (straight-line × 1.3)", get: (p) => `${p.totals.distanceKm.toFixed(1)} km` },

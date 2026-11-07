@@ -18,6 +18,7 @@ const NAV: { href: string; label: string; role?: Role }[] = [
   { href: "/buyer", label: "Buyer simulation", role: "buyer" },
   { href: "/replan", label: "Replanning" },
   { href: "/evidence", label: "Evidence" },
+  { href: "/risk-challenge", label: "Risk Challenge", role: "dispatcher" },
   { href: "/how-it-works", label: "How it works" },
 ];
 
