@@ -44,9 +44,7 @@ export default function DispatcherPage() {
   const { state, update, shift, cards, plan } = useDemo();
   const [filter, setFilter] = React.useState<Filter>("all");
   const [cardOpen, setCardOpen] = React.useState<{ key: string; stopId: string } | null>(null);
-  const impactRef = React.useRef<HTMLDivElement>(null);
-  const [comparisonFocusRequest, requestComparisonFocus] = React.useState(0);
-  const handledComparisonFocus = React.useRef(0);
+  const [compareOpen, setCompareOpen] = React.useState(false);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
   const deliveryTable = React.useRef<HTMLDivElement>(null);
@@ -90,19 +88,10 @@ export default function DispatcherPage() {
   const comparisonReady = !!(baselinePlan && rulesPlan && state.comparisonMeta);
   const comparedDraft = state.comparison?.find((p) => p.method === draft?.method);
   const draftAligned = !draft || !!(comparedDraft && planInputSignature(draft) === planInputSignature(comparedDraft));
-  const focusComparison = () => {
+  const openComparison = () => {
     if (!comparisonReady) update((s) => comparePlans(s));
-    requestComparisonFocus((n) => n + 1);
+    setCompareOpen(true);
   };
-  React.useEffect(() => {
-    if (!comparisonReady || comparisonFocusRequest === handledComparisonFocus.current) return;
-    const target = impactRef.current;
-    if (target) {
-      target.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
-      target.focus({ preventScroll: true });
-      handledComparisonFocus.current = comparisonFocusRequest;
-    }
-  }, [comparisonReady, comparisonFocusRequest]);
 
   const shownRows = shown
     ? shown.stops.filter((ps) => {
@@ -162,7 +151,7 @@ export default function DispatcherPage() {
             <Button variant="primary" onClick={generateProposedPlan}>
               <Sparkles /> Generate Proposed Plan
             </Button>
-            <Button onClick={focusComparison}>
+            <Button onClick={openComparison}>
               <BarChart3 /> Compare Plans
             </Button>
             {draft ? (
@@ -207,16 +196,7 @@ export default function DispatcherPage() {
         </Panel>
       </div>
 
-      <div ref={impactRef} id="projected-impact" role="region" aria-label="Projected Impact" tabIndex={-1} className="scroll-mt-48 rounded-xl sm:scroll-mt-28">
-        {comparisonReady && baselinePlan && rulesPlan && state.comparisonMeta ? (
-          <ProjectedImpact key={state.comparisonMeta.runId} baseline={baselinePlan} rules={rulesPlan} sampleSize={state.comparisonMeta.eligibleEstimatedStops} totalPending={state.comparisonMeta.totalStops} draftAligned={draftAligned} />
-        ) : draft || state.comparison ? (
-          <Panel className="border-warn/50 bg-warn-tint/30 px-4 py-3" role="status">
-            <p className="text-sm font-medium">Projected Impact is out of date.</p>
-            <p className="mt-1 text-xs text-ink-soft">Inputs changed. Select Compare Plans to refresh the comparison, or Generate Proposed Plan for a new Rules-based draft.</p>
-          </Panel>
-        ) : null}
-      </div>
+
 
       <div className="space-y-3">
         <Panel className="px-4 py-3"><details className="ui-disclosure"><summary className="cursor-pointer font-medium">Fixed historical data · {historical.orders.toLocaleString()} orders</summary><div className="space-y-4 pt-4">
@@ -435,7 +415,7 @@ export default function DispatcherPage() {
         </Panel>
 
           <Panel>
-            <PanelHeader title="Route" note="Follow the Planner sequence · choose a time block or a stop to inspect one leg" />
+            <PanelHeader title="Route" />
             <div className="px-4 py-3">
               <RouteMap key={shift.id} riderId={rider.id} plan={shown} states={states} selected={selected} onSelect={selectDelivery} locations={Object.fromEntries(shift.stops.map((s) => [s.id, cards[s.locationKey].name]))} />
             </div>
@@ -455,6 +435,16 @@ export default function DispatcherPage() {
           ) : null}
       </div>
 
+      <Dialog open={compareOpen} onOpenChange={setCompareOpen}>
+        <DialogContent title="Projected Impact — Simulated Estimates" description="Same rider, same parcels and common historical scorer. These are simulated estimates, not measured outcomes." wide className="sm:max-h-[88vh]">
+          {comparisonReady && baselinePlan && rulesPlan && state.comparisonMeta ? (
+            <ProjectedImpact key={state.comparisonMeta.runId} baseline={baselinePlan} rules={rulesPlan} sampleSize={state.comparisonMeta.eligibleEstimatedStops} totalPending={state.comparisonMeta.totalStops} draftAligned={draftAligned} />
+          ) : <div role="status" className="space-y-3 rounded-lg bg-warn-tint p-4 text-sm text-warn">
+            <p>Comparison is out of date. Inputs changed; refresh before reviewing estimates or selecting a draft.</p>
+            <Button onClick={() => update((s) => comparePlans(s))}>Refresh comparison</Button>
+          </div>}
+        </DialogContent>
+      </Dialog>
       <StopCardDialog cardKey={cardOpen?.key ?? null} stopId={cardOpen?.stopId} open={!!cardOpen} onOpenChange={(o) => !o && setCardOpen(null)} from="dispatcher list" />
       <TransferDialog stopId={transferStop} riderName={rider.label} onClose={() => setTransferStop(null)} onConfirm={(note) => transferStop && update((s) => transferParcel(s, transferStop, note))} />
     </div>
@@ -471,7 +461,7 @@ function ProjectedImpact({ baseline, rules, sampleSize, totalPending, draftAlign
   const baselineMinutes = onRoadMinutesPerParcel(baseline);
   const rulesMinutes = onRoadMinutesPerParcel(rules);
   const minutesComparable = baselineMinutes !== null && rulesMinutes !== null && baseline.totals.stops === rules.totals.stops;
-  const finishComparable = baseline.totals.stops === rules.totals.stops && baseline.totals.scheduledStops === baseline.totals.stops && rules.totals.scheduledStops === rules.totals.stops;
+  const finishComparable = totalPending > 0 && baseline.totals.stops === rules.totals.stops && baseline.totals.scheduledStops === baseline.totals.stops && rules.totals.scheduledStops === rules.totals.stops;
   const successDelta = rules.totals.expectedSuccess - baseline.totals.expectedSuccess;
   const successPercent = baseline.totals.expectedSuccess > 0 ? (successDelta / baseline.totals.expectedSuccess) * 100 : null;
   const minutesDelta = minutesComparable ? rulesMinutes! - baselineMinutes! : null;
@@ -479,37 +469,38 @@ function ProjectedImpact({ baseline, rules, sampleSize, totalPending, draftAlign
   const finishDelta = rules.totals.endMin - baseline.totals.endMin;
   const lowChanceDelta = rules.totals.lowChance - baseline.totals.lowChance;
   const scheduledComparable = baseline.totals.stops === rules.totals.stops;
+  const sampleComparable = sampleSize > 0 && scheduledComparable && baseline.totals.estimatedStops === sampleSize && rules.totals.estimatedStops === sampleSize;
   const relative = (v: number | null) => v === null ? "" : ` (${signed(v)}%)`;
-  const stopTimeReason = !scheduledComparable
+  const stopTimeReason = totalPending === 0 ? "No pending stops to compare." : !scheduledComparable
     ? `Pending-stop totals differ (${baseline.totals.stops} vs ${rules.totals.stops}).`
     : `Not comparable: Baseline has ${baseline.totals.stops - baseline.totals.scheduledStops} unscheduled and Rules-based has ${rules.totals.stops - rules.totals.scheduledStops} unscheduled stops.`;
-  return <Panel className="overflow-hidden">
-    <PanelHeader title="Projected Impact — Simulated Estimates" note="Projected plan comparison" actions={<SourceTag kind="simulated" />} />
-    <p className="px-4 pt-3 text-sm text-ink-soft">Comparison uses the same rider, parcels and historical success scorer. Results are simulated estimates, not measured delivery outcomes.</p>
-    {!draftAligned ? <p role="status" className="mx-4 mt-3 rounded-md bg-warn-tint p-3 text-sm text-warn">This comparison uses current inputs; the existing draft differs. Choose Use as draft in the detailed comparison or generate a new proposed plan before dispatch review.</p> : null}
-    <div className="grid gap-3 p-4 md:grid-cols-2">
+  return <div className="space-y-4">
+    {!draftAligned ? <p role="status" className="rounded-md bg-warn-tint p-3 text-sm text-warn">This comparison uses current inputs; the existing draft differs. Choose Use as draft in the detailed comparison or generate a new proposed plan before dispatch review.</p> : null}
+    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
       <div className="rounded-lg border border-line bg-canvas/60 p-4">
-        <h3 className="font-semibold">Before · Baseline</h3>
+        <h3 className="font-semibold">Baseline</h3>
         <ImpactMetrics plan={baseline} minutes={baselineMinutes} />
       </div>
+      <span aria-hidden="true" className="self-center justify-self-center text-2xl text-ink-faint rotate-90 md:rotate-0">→</span>
       <div className="rounded-lg border border-brand/40 bg-brand-tint/30 p-4">
-        <h3 className="font-semibold text-brand-ink">After · S-Compass Rules-based</h3>
+        <h3 className="font-semibold text-brand-ink">S-Compass Rules-based</h3>
         <ImpactMetrics plan={rules} minutes={rulesMinutes} />
       </div>
     </div>
     <div className="grid gap-x-5 gap-y-2 border-t border-line px-4 py-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-      <p><span className="text-ink-faint">Expected first attempts:</span> <b className={successDelta > 0 ? "text-ok" : ""}>{signed(successDelta)} stops{relative(successPercent)}</b></p>
+      <p><span className="text-ink-faint">Expected first attempts:</span> {sampleComparable ? <b className={successDelta > 0 ? "text-ok" : ""}>{signed(successDelta)} stops{relative(successPercent)}</b> : <b>Not comparable</b>}</p>
       <p><span className="text-ink-faint">Minutes per parcel:</span> {minutesComparable ? <b className={minutesDelta! < 0 ? "text-ok" : ""}>{signed(minutesDelta!)} min{relative(minutesPercent)}</b> : <b title={stopTimeReason}>Not comparable</b>}</p>
       <p><span className="text-ink-faint">Estimated finish:</span> {finishComparable ? <b className={finishDelta < 0 ? "text-ok" : ""}>{finishDelta === 0 ? "No change" : `${Math.round(Math.abs(finishDelta))} min ${finishDelta < 0 ? "earlier" : "later"}`}</b> : <b title={stopTimeReason}>Not comparable</b>}</p>
-      <p><span className="text-ink-faint">Low-chance stops:</span> <b className={lowChanceDelta < 0 ? "text-ok" : ""}>{lowChanceDelta === 0 ? "No change" : `${Math.abs(lowChanceDelta)} ${lowChanceDelta < 0 ? "fewer" : "more"} stops`}</b></p>
+      <p><span className="text-ink-faint">Low-chance stops:</span> {finishComparable ? <b className={lowChanceDelta < 0 ? "text-ok" : ""}>{lowChanceDelta === 0 ? "No change" : `${Math.abs(lowChanceDelta)} ${lowChanceDelta < 0 ? "fewer" : "more"} stops`}</b> : <b title={stopTimeReason}>Not comparable</b>}</p>
     </div>
-    {!minutesComparable ? <p role="status" className="px-4 pb-3 text-xs text-warn">{stopTimeReason} Per-parcel time is shown as Not comparable when any pending stop is unscheduled or denominators differ.</p> : null}
+    {!minutesComparable ? <p role="status" className="px-4 pb-3 text-xs text-warn">{stopTimeReason} Time and low-chance improvements require the same pending-stop totals and every pending stop scheduled.</p> : null}
+    {!sampleComparable ? <p role="status" className="px-4 text-xs text-warn">Expected first-attempt changes require the same non-empty common eligible sample.</p> : null}
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-ink-faint">
       <span>Sample: {totalPending} total pending stops · {sampleSize} common eligible estimates. Baseline and Rules use the same start conditions.</span>
       <Button variant="outline" aria-expanded={expanded} aria-controls={detailId} onClick={() => setExpanded((value) => !value)}><BarChart3 /> {expanded ? "Hide Detailed Comparison" : "View Detailed Comparison"}</Button>
     </div>
-    {expanded ? <div id={detailId} className="ui-reveal border-t border-line p-4"><ComparisonDetails /></div> : null}
-  </Panel>;
+    {expanded ? <div id={detailId} className="ui-reveal border-t border-line pt-4"><ComparisonDetails /></div> : null}
+  </div>;
 }
 
 function ImpactMetrics({ plan, minutes }: { plan: Plan; minutes: number | null }) {
