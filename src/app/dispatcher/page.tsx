@@ -448,10 +448,13 @@ function SelectedStop({ ps, onOpen }: { ps?: PlannedStop; onOpen: () => void }) 
 function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { state, update } = useDemo();
   const plans = state.comparison ?? [];
+  const meta = state.comparisonMeta;
   const best = plans.length ? Math.max(...plans.map((p) => p.totals.expectedSuccess)) : 0;
   const rows: { label: string; get: (p: Plan) => string; note?: string }[] = [
     { label: "Expected successful first attempts", get: (p) => p.totals.expectedSuccess.toFixed(1), note: "History-table estimate, same scorer for every method" },
     { label: "Stops with an estimate", get: (p) => `${p.totals.estimatedStops} / ${p.totals.stops}` },
+    { label: "Estimated on-road minutes per parcel", get: (p) => `${(p.totals.stops ? p.totals.onRoadMin / p.totals.stops : 0).toFixed(1)} min (${p.totals.scheduledStops} scheduled / ${p.totals.stops} total)` },
+    { label: "Model prediction (experimental)", get: (p) => p.totals.modelExpectedSuccess === null ? "Not scored" : `${p.totals.modelExpectedSuccess.toFixed(1)} / ${p.totals.modelEstimatedStops} stops`, note: "Logistic regression prediction; not the common comparison score" },
     { label: "Stops in a block with under 65% chance", get: (p) => String(p.totals.lowChance), note: "e.g. schools and offices in the evening" },
     { label: "Distance (straight-line × 1.3)", get: (p) => `${p.totals.distanceKm.toFixed(1)} km` },
     { label: "Working time (travel + search + service)", get: (p) => `${Math.round(p.totals.onRoadMin)} min` },
@@ -465,6 +468,12 @@ function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
       <DialogContent title="Compare plans" description="Same parcels, same rider, same start. All figures are simulated estimates, not measured results." wide>
         {plans.length ? (
           <>
+            {meta ? <div className="mb-3 rounded-lg border border-line bg-canvas p-3 text-xs text-ink-soft">
+              <div><b>Scenario:</b> {meta.scenarioId} · <b>Run:</b> {meta.runId}</div>
+              <div><b>Sample:</b> {meta.totalStops} total stops · {meta.eligibleEstimatedStops} common eligible stops · <b>Source:</b> {meta.dataset}</div>
+              <div><b>KPI method:</b> {meta.successMetric} <span className="font-medium">· SIMULATED</span></div>
+              <div><b>Run time:</b> {new Date(meta.createdAt).toLocaleString()}</div>
+            </div> : null}
             <div className="overflow-x-auto">
               <table className="w-full min-w-[640px] text-sm">
                 <thead>

@@ -496,12 +496,16 @@ export function makePlan(ctx: PlanContext): Plan {
     return (b?.kind === "confirmed" || b?.kind === "changed") && b.block === s.block && !Number.isNaN(s.arriveMin);
   }).length;
   const estimated = live.filter((s) => s.p !== null);
+  const modelEstimated = live.filter((s) => s.pModel !== null);
   const totals = {
     stops: live.length,
     expectedSuccess: estimated.reduce((a, s) => a + (s.p ?? 0), 0),
     estimatedStops: estimated.length,
+    modelExpectedSuccess: method === "model" ? modelEstimated.reduce((a, s) => a + (s.pModel ?? 0), 0) : null,
+    modelEstimatedStops: method === "model" ? modelEstimated.length : 0,
     distanceKm: sched.reduce((a, s) => a + s.distanceM, 0) / 1000,
     onRoadMin: sched.reduce((a, s) => a + s.travelMin + s.searchMin + s.serviceMin, 0),
+    scheduledStops: sched.length,
     endMin: sched.length ? Math.max(...sched.map((s) => s.departMin)) : startMin,
     evening: sched.filter((s) => s.block === "evening").length,
     lowChance: sched.filter((s) => s.p !== null && s.p < 0.65).length,

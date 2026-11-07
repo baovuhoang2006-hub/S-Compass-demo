@@ -4,7 +4,7 @@ import { applyCorrection, buildCard, type CardOverlay, type Correction, type Cor
 import { makePlan } from "./planner";
 import { compareRemaining, type ReplanProposal, type ReplanTrigger } from "./replan";
 import { SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
-import type { Block, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
+import type { Block, ComparisonMetadata, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
 
 export interface BuyerMessage {
   id: string;
@@ -35,6 +35,7 @@ export interface DemoState {
   stopStates: Record<string, Record<string, StopState>>;
   draftPlan: Plan | null;
   comparison: Plan[] | null;
+  comparisonMeta: ComparisonMetadata | null;
   currentPlan: Record<string, Plan | null>;
   clockMin: Record<string, number>;
   proposals: ReplanProposal[];
@@ -89,6 +90,7 @@ export function initialState(): DemoState {
     stopStates: initialStopStates(),
     draftPlan: null,
     comparison: null,
+    comparisonMeta: null,
     currentPlan: Object.fromEntries(fixtures.shifts.map((s) => [s.id, null])),
     clockMin: Object.fromEntries(fixtures.shifts.map((s) => [s.id, SHIFT_START])),
     proposals: [],
@@ -166,7 +168,7 @@ export function selectRider(state: DemoState, riderId: string): DemoState {
 }
 
 export function selectShift(state: DemoState, shiftId: string): DemoState {
-  const s = { ...state, shiftId, draftPlan: null, comparison: null };
+  const s = { ...state, shiftId, draftPlan: null, comparison: null, comparisonMeta: null };
   return log(s, { type: "shift_selected", summary: `Selected ${riderLabel(shiftId)}, ${shiftById(shiftId).weekday} ${shiftById(shiftId).date} shift` });
 }
 
@@ -185,7 +187,49 @@ export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
 
 export function comparePlans(state: DemoState): DemoState {
   const plans = (["baseline", "rules", "model"] as PlanMethod[]).map((m) => planFor(state, m));
-  const s = { ...state, comparison: plans };
+  const commonEligibleIds = new Set(plans[0].stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
+  for (const plan of plans.slice(1)) {
+    const eligible = new Set(plan.stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
+    for (const id of commonEligibleIds) if (!eligible.has(id)) commonEligibleIds.delete(id);
+  }
+  for (const plan of plans) {
+    const comparable = plan.stops.filter((s) => !s.fixed && commonEligibleIds.has(s.stopId));
+    plan.totals.expectedSuccess = comparable.reduce((sum, stop) => sum + (stop.p ?? 0), 0);
+    plan.totals.estimatedStops = comparable.length;
+    plan.totals.modelExpectedSuccess = plan.method === "model"
+      ? comparable.reduce((sum, stop) => sum + (stop.pModel ?? 0), 0)
+      : null;
+    plan.totals.modelEstimatedStops = plan.method === "model"
+      ? comparable.filter((stop) => stop.pModel !== null).length
+      : 0;
+  }
+  const shift = shiftById(state.shiftId);
+  const snapshot = JSON.stringify({
+    shiftId: shift.id,
+    date: shift.date,
+    stops: shift.stops,
+    stopStates: state.stopStates[state.shiftId],
+    cards: cardsFor(state),
+    outcomes: state.outcomes,
+    start: riderPosition(state),
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < snapshot.length; i++) hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
+  const fingerprint = (hash >>> 0).toString(16).padStart(8, "0");
+  const eligibleEstimatedStops = commonEligibleIds.size;
+  const comparisonMeta: ComparisonMetadata = {
+    scenarioId: `${shift.id}:${shift.date}`,
+    runId: `compare-${shift.id}-${fingerprint}`,
+    createdAt: new Date().toISOString(),
+    dataset: "Bundled de-identified demo fixtures (baseline f16db9c)",
+    planner: "src/lib/planner.ts (rules and model weights unchanged from baseline f16db9c)",
+    methods: ["baseline", "rules", "model"],
+    totalStops: plans[0].totals.stops,
+    eligibleEstimatedStops,
+    timeDenominator: "Total pending stops in this scenario; scheduled stop count is shown per method.",
+    successMetric: "Common history-table expected first attempts on the same eligible stop IDs; Model prediction is reported separately on that same set.",
+  };
+  const s = { ...state, comparison: plans, comparisonMeta };
   return log(s, {
     type: "plans_compared",
     role: "dispatcher",
