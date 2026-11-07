@@ -9,7 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { activeImportBatch, saveImportedLocal, setImported } from "@/lib/data";
 import { recordImport, recordImportRemoved, selectShift } from "@/lib/demoState";
-import { HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, templateRows, toCsvText, type ImportBatch, type RowStatus } from "@/lib/intake";
+import { importUseReason } from "@/lib/importSafety";
+import { FAR_PIN_METERS, HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, templateRows, toCsvText, type ImportBatch, type RowStatus } from "@/lib/intake";
 import { downloadText } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
@@ -97,16 +98,24 @@ export default function IntakePage() {
 
   const doImport = () => {
     if (!batch) return;
+    const previousBatch = activeImportBatch();
+    const lockReason = previousBatch ? importUseReason(state, previousBatch) : null;
+    if (lockReason) {
+      setNote(lockReason);
+      return;
+    }
     setImported(batch);
     const warn = saveImportedLocal(batch);
     const s = batch.summary;
-    update((st) =>
-      recordImport(
-        st,
+    update((st) => {
+      const selectedOldImport = previousBatch?.shifts.some((shift) => shift.id === st.shiftId) ?? false;
+      const next = selectedOldImport && batch.shifts[0] ? selectShift(st, batch.shifts[0].id) : st;
+      return recordImport(
+        next,
         `Imported ${batch.fileName}: ${s.riderDays} rider-days`,
         `${s.rowsRead} rows read · ${s.accepted} accepted · ${s.warning} with warning · ${s.quarantined} quarantined · ${s.notProcessed} not processed · ${s.heavyDays} heavy days`,
-      ),
-    );
+      );
+    });
     setIsActive(true);
     setNote(warn ?? `Imported. ${s.riderDays} rider-days are now in the Dispatcher’s rider list, marked “Imported”. Quarantined rows are not planned.`);
   };
@@ -117,6 +126,12 @@ export default function IntakePage() {
   };
 
   const remove = () => {
+    const currentBatch = activeImportBatch();
+    const lockReason = currentBatch ? importUseReason(state, currentBatch) : null;
+    if (lockReason) {
+      setNote(lockReason);
+      return;
+    }
     setImported(null);
     saveImportedLocal(null);
     update((st) => recordImportRemoved(st));
@@ -126,6 +141,8 @@ export default function IntakePage() {
   };
 
   const s = batch?.summary;
+  const currentBatch = activeImportBatch();
+  const importLock = currentBatch ? importUseReason(state, currentBatch) : null;
   const order: Record<RowStatus, number> = { quarantined: 0, warning: 1, accepted: 2 };
   const rows = (batch?.rows ?? []).filter((r) => (filter === "issues" ? true : r.status === filter)).sort((a, b) => order[a.status] - order[b.status] || a.row - b.row);
   const shown = rows.slice(0, 300);
@@ -152,20 +169,21 @@ export default function IntakePage() {
             <FileSpreadsheet /> Practice file
           </Button>
           {activeImportBatch() ? (
-            <Button variant="danger" onClick={remove} className="ml-auto">
+            <Button variant="danger" onClick={remove} className="ml-auto" disabled={!!importLock}>
               <Trash2 /> Remove imported data
             </Button>
           ) : null}
         </div>
         <div className="border-t border-line px-4 py-3 text-xs leading-5 text-ink-faint">
-          Needed: <b>delivery_date</b> and <b>location_type</b> (school, office, industrial, gated_facility). Used when present: order_id, rider_id, location_id or location_name, payment_type,
+          Required: <b>order_id</b>, <b>rider_id</b>, <b>delivery_date</b>, and <b>location_type</b> (school, office, industrial, gated_facility). Optional: location_id or location_name, payment_type,
           parcel_type, address_latitude, address_longitude, buyer_address_processing_time_min, attempt_no, delivery_status, attempt_time. Column names from the Shopee case dataset are recognised, plus common
           English and Vietnamese names. The header can be in any of the first 10 rows; for Excel, the sheet that looks most like delivery data is used. The practice file is fictional. Imported data stays in
-          this browser only.
+          this browser only. Demo validation rules: more than {HEAVY_DAY_PARCELS} parcels marks a heavy rider-day, pins more than {FAR_PIN_METERS} m apart at one place trigger review, service time outside 0–120 minutes is ignored, and the HCMC check uses a broad bounding box (10.3–11.2° N, 106.3–107.1° E), not an official city boundary. These are demo heuristics, not empirical thresholds from the Calculation Sheet.
         </div>
       </Panel>
 
       {note ? <div className="rounded-lg border border-line bg-surface px-4 py-3 text-sm">{note}</div> : null}
+      {importLock ? <div role="alert" className="rounded-lg border border-warn/40 bg-warn-tint px-4 py-3 text-sm text-warn">{importLock}</div> : null}
 
       {error ? (
         <div role="alert" className="rounded-lg border border-bad/30 bg-bad-tint px-4 py-3 text-sm text-bad">
@@ -185,8 +203,8 @@ export default function IntakePage() {
                 isActive ? (
                   <Badge tone="ok">Imported</Badge>
                 ) : (
-                  <Button variant="primary" size="sm" onClick={doImport} disabled={s.riderDays === 0}>
-                    Import {s.riderDays} rider-day{s.riderDays === 1 ? "" : "s"}
+                  <Button variant="primary" size="sm" onClick={doImport} disabled={s.riderDays === 0 || !!importLock}>
+                    {currentBatch ? "Replace with" : "Import"} {s.riderDays} rider-day{s.riderDays === 1 ? "" : "s"}
                   </Button>
                 )
               }

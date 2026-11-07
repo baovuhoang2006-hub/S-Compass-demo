@@ -83,7 +83,7 @@ export default function RiskChallengePage() {
     {result ? <Panel>
       <PanelHeader title={`Incident ${result.incidentId}`} note={`Status: ${result.status.toUpperCase()} · Fallback: ${result.fallback}`} />
       <div className="grid gap-3 p-4 md:grid-cols-2">
-        {([ ["INPUT", result.input], ["DETECTION", result.detection], ["EXPLANATION", result.explanation], ["SAFE ACTION", result.safeAction], ["RESULT", result.result] ] as const).map(([label, value]) =>
+        {([ ["INPUT", result.input], [kind === "ai" ? "AI PROCESSING · DETECTION" : "DETECTION", result.detection], ["EXPLANATION", result.explanation], ["FOLLOW-UP ACTION · SAFE ACTION", result.safeAction], ["OUTPUT · RESULT", result.result] ] as const).map(([label, value]) =>
           <div key={label} className="rounded-lg border border-line bg-canvas p-3"><h2 className="mb-1 text-xs font-semibold tracking-wide text-ink-faint">{label}</h2><p className="break-words text-sm">{value}</p></div>)}
       </div>
       <div role="alert" className="mx-4 rounded-lg bg-warn-tint p-3 text-sm text-warn">{result.warning}</div>

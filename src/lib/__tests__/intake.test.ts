@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { fixtures, setImported, shiftById } from "../data";
-import { dispatchPlan, generatePlan, initialState, planFor, selectShift } from "../demoState";
+import { cardsFor, dispatchPlan, ensureShiftState, generatePlan, initialState, planFor, recordImportRemoved, selectShift } from "../demoState";
 import { messySampleRows, parseCsv, parseDate, parseTable, templateRows, toCsvText } from "../intake";
+import { importUseReason } from "../importSafety";
+import { modelInputFor } from "../planner";
 
 describe("data intake", () => {
   const res = parseTable(messySampleRows(), "practice.csv", null, new Date("2026-11-07T00:00:00Z"));
@@ -12,6 +14,10 @@ describe("data intake", () => {
   it("counts every row and drops none", () => {
     expect(b.summary.rowsRead).toBe(24 + 44 + 11);
     expect(b.summary.accepted + b.summary.warning + b.summary.quarantined).toBe(b.summary.rowsRead);
+    expect(b.shifts.flatMap((shift) => shift.stops).length).toBe(b.summary.accepted + b.summary.warning);
+    for (const id of ["ORD-0903", "ORD-0906", "ORD-0907", "ORD-0910"]) {
+      expect(b.shifts.flatMap((shift) => shift.stops).some((stop) => stop.buyer.includes(id))).toBe(false);
+    }
   });
 
   it("quarantines unknown type, impossible date, duplicate, no rider and empty rows", () => {
@@ -53,7 +59,68 @@ describe("data intake", () => {
     const hp = planFor(selectShift(st, heavy.shiftId), "rules");
     expect(hp.stops.length).toBe(44);
     setImported(null);
+    st = recordImportRemoved(st);
     expect(fixtures.shifts.length).toBe(before);
+    expect(st.shiftId.startsWith("imp-")).toBe(false);
+    expect(Object.keys(st.stopStates).some((id) => id.startsWith("imp-"))).toBe(false);
+    expect(Object.keys(st.currentPlan).some((id) => id.startsWith("imp-"))).toBe(false);
+  });
+
+  it("blocks replacing or removing a batch with an active plan, buyer action, or completed stop", () => {
+    const shift = b.shifts[0];
+    setImported(b);
+    const initial = selectShift(initialState(), shift.id);
+    expect(importUseReason(initial, b)).toBeNull();
+
+    const planned = generatePlan(initial, "rules");
+    expect(importUseReason(planned, b)).toMatch(/plan or recorded rider\/buyer activity/);
+
+    const stop = shift.stops[0];
+    const buyerState = {
+      ...initial,
+      stopStates: {
+        ...initial.stopStates,
+        [shift.id]: {
+          ...initial.stopStates[shift.id],
+          [stop.id]: { ...initial.stopStates[shift.id][stop.id], buyer: { kind: "confirmed" as const, block: "morning" as const, at: "2026-11-07T00:00:00.000Z" } },
+        },
+      },
+    };
+    expect(importUseReason(buyerState, b)).not.toBeNull();
+
+    const completedState = {
+      ...initial,
+      stopStates: {
+        ...initial.stopStates,
+        [shift.id]: {
+          ...initial.stopStates[shift.id],
+          [stop.id]: { ...initial.stopStates[shift.id][stop.id], status: "delivered" as const },
+        },
+      },
+    };
+    expect(importUseReason(completedState, b)).not.toBeNull();
+    setImported(null);
+  });
+
+  it("repairs missing or stale stop-state keys when a replacement reuses a rider-day ID", () => {
+    setImported(b);
+    const shift = b.shifts[0];
+    const state = selectShift(initialState(), shift.id);
+    const [first, ...rest] = shift.stops;
+    const damaged = {
+      ...state,
+      stopStates: {
+        ...state.stopStates,
+        [shift.id]: {
+          ...Object.fromEntries(rest.map((stop) => [stop.id, state.stopStates[shift.id][stop.id]])),
+          "stale-order-id": { status: "pending" as const, buyer: { kind: "none" as const } },
+        },
+      },
+    };
+    const repaired = ensureShiftState(damaged, shift.id);
+    expect(repaired.stopStates[shift.id][first.id]).toMatchObject({ status: "pending", buyer: { kind: "none" } });
+    expect(Object.keys(repaired.stopStates[shift.id])).toEqual(shift.stops.map((stop) => stop.id));
+    setImported(null);
   });
 
   it("reads dates, CSV and the template", () => {
@@ -89,5 +156,18 @@ describe("data intake", () => {
       expect(r.batch.shifts[1].stops[0].isReattempt).toBe(true);
       expect(r.batch.shifts[0].actualDatasetOutcome.delivered).toBe(1);
     }
+  });
+
+  it("keeps imported target outcomes out of model inference inputs", () => {
+    setImported(b);
+    const shift = b.shifts[0];
+    const state = selectShift(initialState(), shift.id);
+    const stop = shift.stops[0];
+    const card = cardsFor(state)[stop.locationKey];
+    const input = modelInputFor(stop, shift, card, "morning");
+    expect(b.knowledge.every((record) => record.firstAttemptSuccess === null && Object.keys(record.windowHistory).length === 0)).toBe(true);
+    expect(input).not.toHaveProperty("delivered");
+    expect(input).not.toHaveProperty("deliveryStatus");
+    setImported(null);
   });
 });

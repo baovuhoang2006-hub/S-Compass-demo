@@ -168,10 +168,17 @@ export function selectRider(state: DemoState, riderId: string): DemoState {
 }
 
 export function ensureShiftState(state: DemoState, shiftId: string): DemoState {
-  if (state.stopStates[shiftId] && shiftId in state.currentPlan && shiftId in state.clockMin) return state;
   const shift = shiftById(shiftId);
+  const existing = state.stopStates[shiftId] ?? {};
+  const validIds = new Set(shift.stops.map((stop) => stop.id));
+  const stopStates = Object.fromEntries(shift.stops.map((stop) => [
+    stop.id,
+    existing[stop.id] ?? { status: "pending", buyer: { kind: "none" } } as StopState,
+  ]));
+  const needsStopStateRepair = Object.keys(existing).length !== shift.stops.length || shift.stops.some((stop) => !existing[stop.id]) || Object.keys(existing).some((id) => !validIds.has(id));
+  if (!needsStopStateRepair && shiftId in state.currentPlan && shiftId in state.clockMin) return state;
   return { ...state,
-    stopStates: { ...state.stopStates, [shiftId]: state.stopStates[shiftId] ?? Object.fromEntries(shift.stops.map((x) => [x.id, { status: "pending", buyer: { kind: "none" } } as StopState])) },
+    stopStates: { ...state.stopStates, [shiftId]: stopStates },
     currentPlan: { ...state.currentPlan, [shiftId]: state.currentPlan[shiftId] ?? null },
     clockMin: { ...state.clockMin, [shiftId]: state.clockMin[shiftId] ?? SHIFT_START },
   };
@@ -186,7 +193,17 @@ export function recordImport(state: DemoState, summary: string, details: string)
   return log(state, { type: "data_imported", role: "dispatcher", summary, input: details });
 }
 export function recordImportRemoved(state: DemoState): DemoState {
-  const back = state.shiftId.startsWith("imp-") ? { ...state, shiftId: fixtures.shifts.find((s) => !s.id.startsWith("imp-"))?.id ?? fixtures.shifts[0].id, draftPlan: null, comparison: null, comparisonMeta: null } : state;
+  const fallbackShift = fixtures.shifts.find((s) => !s.id.startsWith("imp-"))?.id ?? fixtures.shifts[0].id;
+  const back = {
+    ...state,
+    shiftId: state.shiftId.startsWith("imp-") ? fallbackShift : state.shiftId,
+    stopStates: Object.fromEntries(Object.entries(state.stopStates).filter(([id]) => !id.startsWith("imp-"))),
+    currentPlan: Object.fromEntries(Object.entries(state.currentPlan).filter(([id]) => !id.startsWith("imp-"))),
+    clockMin: Object.fromEntries(Object.entries(state.clockMin).filter(([id]) => !id.startsWith("imp-"))),
+    draftPlan: state.draftPlan?.shiftId.startsWith("imp-") ? null : state.draftPlan,
+    comparison: state.comparison?.some((plan) => plan.shiftId.startsWith("imp-")) ? null : state.comparison,
+    comparisonMeta: state.comparisonMeta?.scenarioId.startsWith("imp-") ? null : state.comparisonMeta,
+  };
   return log(back, { type: "data_import_removed", role: "dispatcher", summary: "Imported data removed; demo fixtures kept" });
 }
 

@@ -77,8 +77,8 @@ export default function EvidencePage() {
         <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Testers in this log: {m.testers.join(", ") || "none set yet"}.</p>
       </Panel>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <Panel>
+      <div className="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <Panel className="min-w-0">
           <PanelHeader
             title="Interaction log"
             note={`${events.length} of ${state.events.length} events`}
