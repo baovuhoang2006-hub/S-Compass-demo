@@ -1,6 +1,6 @@
 # Data Intake UI V1 — FAST REVIEW
 
-> Bản điều chỉnh mới nhất: [gom cảnh báo vào từng rider-day card](warning-consolidation.md). Nội dung và ảnh bên dưới ghi lại FAST REVIEW ban đầu trước điều chỉnh. 
+> Bản điều chỉnh mới nhất: [gom cảnh báo vào từng rider-day card](warning-consolidation.md). Nội dung và ảnh bên dưới ghi lại FAST REVIEW ban đầu trước điều chỉnh.
 
 Nhánh: `codex/data-intake-ui-review`.
 Đã kiểm tra `release/bce004-final` cả local/GitHub trước khi bắt đầu: đúng `0b278bc8afef9b61edc1374fb1699ee491b44588`. Không dùng một HEAD khác, không sửa release/main.
