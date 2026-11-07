@@ -1,93 +1,69 @@
 "use client";
 
-import { BLOCKS, fmt } from "@/lib/time";
-import type { Plan, StopState } from "@/lib/types";
-import { cn } from "@/lib/utils";
 import * as React from "react";
+import { blockColor } from "@/components/bits";
+import { scheduleExceptions, timelineGroups } from "@/lib/routePresentation";
+import { BLOCKS, blockLabel, fmt } from "@/lib/time";
+import type { Plan, PlannedStop, StopState } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
-/**
- * The shift as a time ribbon: each stop sits at its simulated arrival time, coloured by
- * its history-table chance of success. This is where the window choice becomes visible.
- */
-export function ShiftRibbon({
-  plan,
-  states,
-  clockMin,
-  onSelect,
-  selected,
-}: {
-  plan: Plan;
-  states: Record<string, StopState>;
-  clockMin?: number;
-  onSelect?: (id: string) => void;
-  selected?: string | null;
+export function ShiftRibbon({ plan, states, clockMin, onSelect, selected }: {
+  plan: Plan; states: Record<string, StopState>; clockMin?: number;
+  onSelect?: (id: string) => void; selected?: string | null;
 }) {
   const [expanded, setExpanded] = React.useState<string | null>(null);
-
-  return (
-    <div>
-      <div className="space-y-3">
-        {BLOCKS.map((b) => {
-          const label = b.id === "morning" ? "Morning" : b.id === "afternoon" ? "Afternoon" : "Evening";
-          const span = b.end - b.start;
-          const x = (m: number) => Math.max(0, Math.min(100, ((m - b.start) / span) * 100));
-          const stops = plan.stops.filter((s) => s.block === b.id && Number.isFinite(s.arriveMin)).sort((a, b) => a.arriveMin - b.arriveMin);
-          const clusters: { stops: typeof stops; x: number }[] = [];
-          for (const s of stops) {
-            const at = x(s.arriveMin);
-            const tail = clusters[clusters.length - 1];
-            if (tail && at - tail.x < 5) {
-              tail.stops.push(s);
-              tail.x = tail.stops.reduce((sum, item) => sum + x(item.arriveMin), 0) / tail.stops.length;
-            } else clusters.push({ stops: [s], x: at });
-          }
-          const tone = b.id === "morning" ? "bg-morning/[0.08]" : b.id === "afternoon" ? "bg-afternoon/[0.09]" : "bg-evening/[0.09]";
-          return <section key={b.id} aria-label={`${label} ${fmt(b.start)}–${fmt(b.end)}`}>
-            <div className="mb-1 flex items-center justify-between text-xs font-medium text-ink-soft"><span>{label}</span><span>{fmt(b.start)}–{fmt(b.end)}</span></div>
-            <div className={cn("relative h-12 rounded-md border border-line", tone)}>
-              {Array.from({ length: 5 }, (_, i) => {
-                const tick = b.start + span * i / 4;
-                return <div key={i} className="absolute inset-y-0 border-l border-line/70" style={{ left: `${i * 25}%` }}><span className="absolute bottom-0.5 left-1 text-[9px] text-ink-faint">{fmt(tick)}</span></div>;
-              })}
-              {clockMin !== undefined && clockMin >= b.start && clockMin <= b.end ? <div className="absolute inset-y-0 z-[1] w-0.5 bg-brand" style={{ left: `${x(clockMin)}%` }} title={`Simulated time ${fmt(clockMin)}`} /> : null}
-              {clusters.map(({ stops: group, x: at }) => {
-                const key = `${b.id}:${group[0].stopId}`;
-                const active = group.some((s) => s.stopId === selected);
-                const stopButton = (s: typeof group[number]) => {
-                  const st = states[s.stopId]?.status;
-                  const done = st === "delivered" || st === "failed";
-                  const color = s.p === null ? "bg-info" : s.p >= 0.8 ? "bg-ok" : s.p >= 0.65 ? "bg-warn" : "bg-bad";
-                  return <button key={s.stopId} type="button" onClick={() => onSelect?.(s.stopId)} className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-semibold text-white", done ? "bg-ink-faint" : color, selected === s.stopId && "ring-2 ring-brand")} aria-label={`Stop sequence ${s.seq}, ${s.stopId}, ETA ${fmt(s.arriveMin)}`} title={`${s.stopId} · ${fmt(s.arriveMin)}`}>#{s.seq}</button>;
-                };
-                return <div key={key} className="absolute top-1 z-[2] -translate-x-1/2" style={{ left: `${at}%` }}>
-                  {group.length === 1 ? stopButton(group[0]) : <button type="button" onClick={() => setExpanded(expanded === key ? null : key)} className="rounded-full border border-line bg-surface px-2 py-0.5 text-[10px] font-semibold text-ink shadow-sm" aria-expanded={expanded === key} aria-label={`Show ${group.length} stops close in time`}>+{group.length}</button>}
-                  {group.length > 1 && expanded === key ? <div className="absolute left-1/2 top-7 z-10 min-w-40 -translate-x-1/2 space-y-1 rounded-md border border-line bg-surface p-2 shadow-lg">{group.map((s) => <div key={s.stopId} className="flex items-center justify-between gap-2 text-xs"><span>{stopButton(s)}</span><span>{s.stopId} · {fmt(s.arriveMin)}</span></div>)}</div> : null}
-                  {group.length === 1 ? <span className="sr-only">{at.toFixed(1)}%</span> : null}
-                </div>;
-              })}
-            </div>
-          </section>;
-        })}
-      </div>
-      {plan.stops.some((s) => !Number.isFinite(s.arriveMin)) ? <div className="mt-2 rounded-md border border-warn/40 bg-warn-tint px-3 py-2 text-xs text-warn"><b>Unscheduled stops ({plan.stops.filter((s) => !Number.isFinite(s.arriveMin)).length})</b><ul className="mt-1 list-inside list-disc">{plan.stops.filter((s) => !Number.isFinite(s.arriveMin)).map((s) => <li key={s.stopId}>#{s.seq} · {s.stopId} — no ETA available</li>)}</ul></div> : null}
-      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-faint">
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-2 rounded-sm bg-ok" /> ≥80% chance
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-2 rounded-sm bg-warn" /> 65–79%
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-2 rounded-sm bg-bad" /> &lt;65%
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-2 rounded-sm bg-info" /> pickup (not estimated)
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="h-3 w-2 rounded-sm bg-ink-faint/40" /> done
-        </span>
-        <span>Chance = history-table estimate (simulated)</span>
-      </div>
-    </div>
-  );
+  const [width, setWidth] = React.useState(300);
+  const container = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const observer = new ResizeObserver(([entry]) => setWidth(Math.max(1, entry.contentRect.width - 40)));
+    if (container.current) observer.observe(container.current);
+    return () => observer.disconnect();
+  }, []);
+  const exceptions = scheduleExceptions(plan.stops);
+  const select = (stop: PlannedStop) => onSelect?.(stop.stopId);
+  return <div ref={container} className="space-y-5">
+    {BLOCKS.map((block) => {
+      const groups = timelineGroups(plan.stops.filter((s) => s.block === block.id), block.start, block.end, width);
+      const ticks = [block.start];
+      for (let tick = Math.ceil((block.start + 45) / 60) * 60; tick < block.end; tick += 60) ticks.push(tick);
+      ticks.push(block.end);
+      const opened = groups.find((g) => `${block.id}:${g.stops[0].stopId}` === expanded);
+      return <section key={block.id} aria-label={blockLabel(block.id)}>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <h3 className="flex items-center gap-2 font-semibold"><span className="size-2.5 rounded-full" style={{ background: blockColor(block.id) }} />{block.label}</h3>
+          <span className="text-ink-soft">{fmt(block.start)}–{fmt(block.end)}</span>
+        </div>
+        <div className="px-5">
+          <div className="relative h-16 rounded-lg border border-line" style={{ backgroundColor: `${blockColor(block.id)}0d` }}>
+            {ticks.map((tick) => <div key={tick} className="absolute inset-y-0 border-l border-line/70" style={{ left: `${(tick - block.start) / (block.end - block.start) * 100}%` }} />)}
+            {clockMin !== undefined && clockMin >= block.start && clockMin <= block.end ? <div className="absolute inset-y-0 w-0.5 bg-brand" style={{ left: `${(clockMin - block.start) / (block.end - block.start) * 100}%` }} title={`Simulated time ${fmt(clockMin)}`} /> : null}
+            {groups.map((group) => {
+              const key = `${block.id}:${group.stops[0].stopId}`;
+              const active = group.stops.some((s) => s.stopId === selected);
+              const single = group.stops[0];
+              const done = group.stops.every((s) => ["delivered", "failed"].includes(states[s.stopId]?.status));
+              return <button key={key} type="button" style={{ left: `${group.percent}%`, backgroundColor: done ? "#6b7590" : blockColor(block.id) }}
+                className={cn("ui-select absolute top-3 min-h-9 min-w-9 -translate-x-1/2 rounded-full border-2 border-white px-2 text-xs font-semibold text-white shadow-sm hover:brightness-90", active && "ring-2 ring-brand ring-offset-2")}
+                aria-label={group.stops.length > 1 ? `Show ${group.stops.length} ${block.label.toLowerCase()} stops close in time` : `Stop sequence ${single.seq}, ${single.stopId}, ETA ${fmt(single.arriveMin)}`}
+                aria-expanded={group.stops.length > 1 ? expanded === key : undefined}
+                aria-pressed={group.stops.length === 1 ? active : undefined}
+                title={group.stops.map((s) => `#${s.seq} · ${s.stopId} · ${fmt(s.arriveMin)} · ${s.p === null ? "no estimate" : `${Math.round(s.p * 100)}% history-table estimate`}`).join("\n")}
+                onClick={() => group.stops.length > 1 ? setExpanded(expanded === key ? null : key) : select(single)}>
+                {group.stops.length > 1 ? `+${group.stops.length}` : `#${single.seq}`}
+              </button>;
+            })}
+            {!groups.length ? <p className="px-3 pt-5 text-center text-xs text-ink-faint">No stops inside this window</p> : null}
+          </div>
+          <div className="relative mt-1 h-5 text-[10px] text-ink-soft sm:text-xs">{ticks.map((tick) => <span key={tick} className="absolute -translate-x-1/2" style={{ left: `${(tick - block.start) / (block.end - block.start) * 100}%` }}>{fmt(tick)}</span>)}</div>
+        </div>
+        {opened ? <div className="ui-reveal mt-2 rounded-lg border border-line bg-canvas/70 p-3">
+          <div className="mb-2 flex items-center justify-between text-sm"><b>{opened.stops.length} stops close in time</b><button type="button" className="text-info underline" onClick={() => setExpanded(null)}>Collapse</button></div>
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{opened.stops.map((s) => <button type="button" key={s.stopId} onClick={() => select(s)} aria-pressed={selected === s.stopId} className={cn("ui-select flex min-h-11 items-center justify-between gap-3 rounded-md border border-line bg-surface px-3 text-sm hover:border-ink-faint", selected === s.stopId && "border-brand bg-brand-tint")}><span><b>#{s.seq}</b> · {s.stopId}</span><span>{fmt(s.arriveMin)}</span></button>)}</div>
+        </div> : null}
+      </section>;
+    })}
+    {exceptions.outsideWindow.length ? <div role="status" className="rounded-lg border border-warn/40 bg-warn-tint p-3 text-sm text-warn"><b>Outside assigned time window · {exceptions.outsideWindow.length} stops</b><p className="mt-1">These original simulated ETAs are shown here instead of being moved to the edge of the timeline.</p><div className="mt-2 flex flex-wrap gap-2">{exceptions.outsideWindow.map((s) => <button type="button" key={s.stopId} className="rounded-md border border-warn/40 bg-surface px-3 py-2 text-left" onClick={() => select(s)}>#{s.seq} · {s.stopId} · {fmt(s.arriveMin)}<span className="block text-xs">Assigned: {blockLabel(s.block)}</span></button>)}</div></div> : null}
+    {exceptions.unscheduled.length ? <div role="status" className="rounded-lg border border-bad/30 bg-bad-tint p-3 text-sm text-bad"><b>Unscheduled stops · {exceptions.unscheduled.length}</b><div className="mt-2 flex flex-wrap gap-2">{exceptions.unscheduled.map((s) => <button type="button" key={s.stopId} onClick={() => select(s)} className="rounded-md border border-bad/30 bg-surface px-3 py-2">#{s.seq} · {s.stopId} — no ETA available</button>)}</div></div> : null}
+    <p className="text-xs text-ink-faint">Simulated arrival times · # is the Planner sequence · +N opens all grouped stops. Select a stop to highlight it in Deliveries and Route.</p>
+  </div>;
 }

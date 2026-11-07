@@ -53,14 +53,14 @@ export function BlockTag({ block, eta, className }: { block: Block; eta?: number
       <span className={cn("size-2.5 rounded-full", BLOCK_DOT[block])} aria-hidden />
       <span>
         {info.label}
-        {eta !== undefined && !Number.isNaN(eta) ? <span className="text-ink-faint"> · ETA {fmt(eta)}</span> : null}
+        {eta !== undefined ? Number.isFinite(eta) ? <span className="text-ink-faint"> · ETA {fmt(eta)}</span> : <span className="text-warn"> · Unscheduled</span> : null}
       </span>
     </span>
   );
 }
 
 export function blockColor(block: Block) {
-  return block === "morning" ? "#3d7cc9" : block === "afternoon" ? "#d18a12" : "#4b3f8f";
+  return block === "morning" ? "#356daf" : block === "afternoon" ? "#a66300" : "#4b3f8f";
 }
 
 export function ChanceText({ p }: { p: number | null }) {

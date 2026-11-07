@@ -47,7 +47,16 @@ export default function DispatcherPage() {
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
-  const [showDetails, setShowDetails] = React.useState(false);
+  const deliveryTable = React.useRef<HTMLDivElement>(null);
+  const selectDelivery = (stopId: string) => { setFilter("all"); setSelected(stopId); };
+  React.useEffect(() => {
+    const container = deliveryTable.current;
+    const row = container?.querySelector<HTMLElement>(`[data-delivery-stop="${CSS.escape(selected ?? "")}"]`);
+    if (container && row && (row.getBoundingClientRect().top < container.getBoundingClientRect().top + 40 || row.getBoundingClientRect().bottom > container.getBoundingClientRect().bottom)) container.scrollTo({
+      top: container.scrollTop + row.getBoundingClientRect().top - container.getBoundingClientRect().top - 40,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+  }, [selected, filter]);
 
   const rider = riderOfShift(shift);
   const draft = state.draftPlan && state.draftPlan.shiftId === shift.id ? state.draftPlan : null;
@@ -106,7 +115,7 @@ export default function DispatcherPage() {
               id="rider"
               className="mt-1 block h-10 rounded-lg border border-line bg-surface px-3 text-sm font-medium"
               value={rider.id}
-              onChange={(e) => update((s) => selectRider(s, e.target.value))}
+              onChange={(e) => { setSelected(null); setFilter("all"); update((s) => selectRider(s, e.target.value)); }}
             >
               {fixtures.riders.map((r) => (
                 <option key={r.id} value={r.id}>
@@ -124,7 +133,7 @@ export default function DispatcherPage() {
               id="shift"
               className="mt-1 block h-10 rounded-lg border border-line bg-surface px-3 text-sm font-medium"
               value={shift.id}
-              onChange={(e) => update((s) => selectShift(s, e.target.value))}
+              onChange={(e) => { setSelected(null); setFilter("all"); update((s) => selectShift(s, e.target.value)); }}
             >
               {rider.shiftIds.map((id) => {
                 const s = fixtures.shifts.find((x) => x.id === id)!;
@@ -195,9 +204,25 @@ export default function DispatcherPage() {
         </Panel>
       ) : null}
 
-      <Panel className="px-4 py-3"><details><summary className="cursor-pointer font-medium">Fixed historical data · {historical.orders.toLocaleString()} orders ({historical.period.from}–{historical.period.to})</summary><div className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4"><Stat label="First-attempt success" value={pct(historical.kpis.firstAttemptSuccess, 1)} sub={`Case target ${pct(historical.caseTargets.firstAttemptSuccess)}`} /><Stat label="Re-delivery rate" value={pct(historical.kpis.redeliveryRate, 1)} sub={`Case target ${pct(historical.caseTargets.redeliveryRate, 1)}`} /><Stat label="Evening vs morning" value={`${pct(historical.byWindow.find((w) => w.attempt_time === "evening")!.success)} vs ${pct(historical.byWindow.find((w) => w.attempt_time === "morning")!.success)}`} sub="first-attempt success" /><Stat label="Actual result for this rider-day" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "No actual outcome available"} sub={shift.actualDatasetOutcome.attempts ? "actual delivery attempts in dataset" : "Imported rider-day has no outcome"} /></div></details></Panel>
-      <div className="flex justify-end"><Button variant="outline" aria-expanded={showDetails} onClick={() => setShowDetails((v) => !v)}>{showDetails ? "Hide details" : "View details"}</Button></div>
-      {showDetails ? <Panel className="px-4 py-3"><div className="mb-3 text-sm font-semibold">Additional measures and explanation</div><div className="grid gap-3 sm:grid-cols-3"><Stat label="Default method" value="Rules-based" sub="Creates a draft only; never dispatches automatically" /><Stat label="Comparison input" value="Same shift and stops" sub="See the detailed denominator in Compare Plans" /><Stat label="Model" value="Experimental" sub="Logistic Regression predictions are reported separately" /></div><p className="mt-3 text-xs text-ink-faint">{state.method === "baseline" ? "Baseline follows the nearest map pin without considering site notes or receiving windows." : state.method === "model" ? "Model uses logistic regression with the same constraints; experimental predictions are not measured outcomes." : "Rules-based uses historical success by time window, verified site rules, buyer confirmations and block capacity."} <Link href="/how-it-works" className="text-info underline">Read the full explanation</Link></p></Panel> : null}
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Panel className="px-4 py-3"><details className="ui-disclosure"><summary className="cursor-pointer font-medium">Fixed historical data · {historical.orders.toLocaleString()} orders</summary><div className="space-y-4 pt-4">
+          <p className="text-sm text-ink-soft">Observed outcomes from {historical.period.from} to {historical.period.to}. Business targets come from the BCE004 Proposal; they are goals, not measured achievements. Draft-plan estimates are simulated separately above.</p>
+          <div className="grid grid-cols-2 gap-4">
+            <Stat label="Historical first-attempt success" value={pct(historical.kpis.firstAttemptSuccess, 1)} sub="Observed dataset outcome" />
+            <Stat label="Business target: first-attempt success" value={pct(historical.caseTargets.firstAttemptSuccess)} sub="Case target; not an achieved result" />
+            <Stat label="Historical re-delivery rate" value={pct(historical.kpis.redeliveryRate, 1)} sub={`Case target: ${pct(historical.caseTargets.redeliveryRate, 1)}`} />
+            <Stat label="Evening vs morning success" value={`${pct(historical.byWindow.find((w) => w.attempt_time === "evening")!.success, 0)} vs ${pct(historical.byWindow.find((w) => w.attempt_time === "morning")!.success, 0)}`} sub="Observed first attempts" />
+            <Stat label="Selected rider-day actual outcome" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "No actual outcome available"} sub={shift.actualDatasetOutcome.attempts ? "Delivered / actual delivery attempts in dataset" : "No recorded outcome for this rider-day"} />
+          </div>
+        </div></details></Panel>
+        <Panel className="px-4 py-3"><details className="ui-disclosure"><summary className="cursor-pointer font-medium">Methodology &amp; Data Sources</summary><dl className="space-y-3 pt-4 text-sm">
+          <div><dt className="font-semibold">Default method</dt><dd className="mt-1 text-ink-soft">Rules-based uses historical success by delivery block, verified site rules, buyer confirmations and capacity. It is the best-supported operating method in the current evidence.</dd></div>
+          <div><dt className="font-semibold">Data provenance</dt><dd className="mt-1 text-ink-soft">Dataset = recorded history. Simulated = planned estimates. Live demo = actions recorded in this browser session.</dd></div>
+          <div><dt className="font-semibold">KPI denominators</dt><dd className="mt-1 text-ink-soft">Expected first attempts use the same eligible estimated stops across methods. Scheduled / total shows every pending order. Minutes per parcel includes travel, entrance search and service, and is comparable only when all pending orders are scheduled.</dd></div>
+          <div><dt className="font-semibold">Experimental Model</dt><dd className="mt-1 text-ink-soft">Logistic Regression predictions are separate from the common history-table score. Predictions and simulated estimates are not observed outcomes.</dd></div>
+          <div><dt className="font-semibold">Route and time assumptions</dt><dd className="mt-1 text-ink-soft">Anonymized coordinates and straight-line distance × 1.3; travel times and block boundaries use existing demo assumptions. These are not street directions or measured traffic conditions.</dd></div>
+        </dl><p className="pt-4 text-sm"><Link href="/how-it-works" className="text-info underline">Read the full methodology</Link></p></details></Panel>
+      </div>
 
       {openProposal || pendingCorrections.length ? (
         <div className="flex flex-wrap gap-3">
@@ -214,7 +239,12 @@ export default function DispatcherPage() {
         </div>
       ) : null}
 
-      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+      <Panel className="min-w-0" aria-label="Delivery Schedule">
+        <PanelHeader title="Delivery Schedule" note="Simulated arrival times · select a stop to highlight it in Deliveries and Route" actions={<SourceTag kind="simulated" />} />
+        <div className="p-4 sm:p-5">{shown ? <ShiftRibbon key={shift.id} plan={shown} states={states} clockMin={plan ? state.clockMin[shift.id] : undefined} onSelect={selectDelivery} selected={selected} /> : <p className="text-sm text-ink-faint">Appears after you generate a plan.</p>}</div>
+      </Panel>
+
+      <div className="min-w-0 space-y-5">
         <Panel className="min-w-0">
                 <PanelHeader
             title="Deliveries"
@@ -247,7 +277,7 @@ export default function DispatcherPage() {
                   </button>
                 ))}
               </div>
-              <div className="max-h-[760px] overflow-auto">
+              <div ref={deliveryTable} className="max-h-[520px] overflow-auto">
                 <p className="px-3 py-1 text-xs text-ink-faint sm:hidden">Swipe horizontally to see all order details.</p>
                 <table className="w-full min-w-[820px] text-sm">
                   <thead className="sticky top-0 z-[1] bg-surface text-left text-xs text-ink-faint">
@@ -274,7 +304,9 @@ export default function DispatcherPage() {
                       return (
                         <tr
                           key={ps.stopId}
-                          className={cn("border-b border-line/70 align-top hover:bg-canvas/60", selected === ps.stopId && "bg-brand-tint/50")}
+                          data-delivery-stop={ps.stopId}
+                          aria-selected={selected === ps.stopId}
+                          className={cn("ui-select border-b border-line/70 align-top hover:bg-canvas/60", selected === ps.stopId && "bg-brand-tint/50")}
                           onClick={() => setSelected(ps.stopId)}
                         >
                           <td className="px-3 py-2.5 text-ink-faint">{ps.seq}</td>
@@ -363,7 +395,7 @@ export default function DispatcherPage() {
               <EmptyState
                 title="No plan for this shift yet"
                 action={
-                  <Button variant="primary" onClick={() => update((s) => generatePlan(s, "rules"))}>
+                  <Button variant="primary" onClick={generateProposedPlan}>
                     <Sparkles /> Generate Proposed Plan
                   </Button>
                 }
@@ -386,21 +418,10 @@ export default function DispatcherPage() {
           )}
         </Panel>
 
-        <div className="min-w-0 space-y-5">
           <Panel>
-            <PanelHeader title="Shift timeline" note="Each mark is a stop at its simulated arrival time" actions={<SourceTag kind="simulated" />} />
+            <PanelHeader title="Route" note="Follow the Planner sequence · choose a time block or a stop to inspect one leg" />
             <div className="px-4 py-3">
-              {shown ? (
-                <ShiftRibbon plan={shown} states={states} clockMin={plan ? state.clockMin[shift.id] : undefined} onSelect={setSelected} selected={selected} />
-              ) : (
-                <p className="text-sm text-ink-faint">Appears after you generate a plan.</p>
-              )}
-            </div>
-          </Panel>
-          <Panel>
-            <PanelHeader title="Route" note="Select a point to highlight the matching delivery" />
-            <div className="px-4 py-3">
-              <RouteMap riderId={rider.id} plan={shown} states={states} selected={selected} onSelect={setSelected} />
+              <RouteMap key={shift.id} riderId={rider.id} plan={shown} states={states} selected={selected} onSelect={selectDelivery} locations={Object.fromEntries(shift.stops.map((s) => [s.id, cards[s.locationKey].name]))} />
             </div>
           </Panel>
           {selected && shown ? <SelectedStop ps={shown.stops.find((x) => x.stopId === selected)} onOpen={() => setCardOpen({ key: stopById[selected].locationKey, stopId: selected })} /> : null}
@@ -416,7 +437,6 @@ export default function DispatcherPage() {
               </ul>
             </Panel>
           ) : null}
-        </div>
       </div>
 
       <StopCardDialog cardKey={cardOpen?.key ?? null} stopId={cardOpen?.stopId} open={!!cardOpen} onOpenChange={(o) => !o && setCardOpen(null)} from="dispatcher list" />
