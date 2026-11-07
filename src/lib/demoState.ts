@@ -167,9 +167,27 @@ export function selectRider(state: DemoState, riderId: string): DemoState {
   return selectShift(state, riderById(riderId).shiftIds[0]);
 }
 
+export function ensureShiftState(state: DemoState, shiftId: string): DemoState {
+  if (state.stopStates[shiftId] && shiftId in state.currentPlan && shiftId in state.clockMin) return state;
+  const shift = shiftById(shiftId);
+  return { ...state,
+    stopStates: { ...state.stopStates, [shiftId]: state.stopStates[shiftId] ?? Object.fromEntries(shift.stops.map((x) => [x.id, { status: "pending", buyer: { kind: "none" } } as StopState])) },
+    currentPlan: { ...state.currentPlan, [shiftId]: state.currentPlan[shiftId] ?? null },
+    clockMin: { ...state.clockMin, [shiftId]: state.clockMin[shiftId] ?? SHIFT_START },
+  };
+}
+
 export function selectShift(state: DemoState, shiftId: string): DemoState {
-  const s = { ...state, shiftId, draftPlan: null, comparison: null, comparisonMeta: null };
+  const s = { ...ensureShiftState(state, shiftId), shiftId, draftPlan: null, comparison: null, comparisonMeta: null };
   return log(s, { type: "shift_selected", summary: `Selected ${riderLabel(shiftId)}, ${shiftById(shiftId).weekday} ${shiftById(shiftId).date} shift` });
+}
+
+export function recordImport(state: DemoState, summary: string, details: string): DemoState {
+  return log(state, { type: "data_imported", role: "dispatcher", summary, input: details });
+}
+export function recordImportRemoved(state: DemoState): DemoState {
+  const back = state.shiftId.startsWith("imp-") ? { ...state, shiftId: fixtures.shifts.find((s) => !s.id.startsWith("imp-"))?.id ?? fixtures.shifts[0].id, draftPlan: null, comparison: null, comparisonMeta: null } : state;
+  return log(back, { type: "data_import_removed", role: "dispatcher", summary: "Imported data removed; demo fixtures kept" });
 }
 
 export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
@@ -221,7 +239,9 @@ export function comparePlans(state: DemoState): DemoState {
     scenarioId: `${shift.id}:${shift.date}`,
     runId: `compare-${shift.id}-${fingerprint}`,
     createdAt: new Date().toISOString(),
-    dataset: "Bundled de-identified demo fixtures (baseline f16db9c)",
+    dataset: shift.id.startsWith("imp-")
+      ? "User-imported browser-only batch (validated; imported orders only)"
+      : "Bundled de-identified demo fixtures (baseline f16db9c)",
     planner: "src/lib/planner.ts (rules and model weights unchanged from baseline f16db9c)",
     methods: ["baseline", "rules", "model"],
     totalStops: plans[0].totals.stops,

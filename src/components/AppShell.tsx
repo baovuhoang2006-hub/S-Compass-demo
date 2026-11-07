@@ -13,6 +13,7 @@ import { useDemo } from "@/state/DemoProvider";
 
 const NAV: { href: string; label: string; role?: Role }[] = [
   { href: "/dispatcher", label: "Dispatcher", role: "dispatcher" },
+  { href: "/intake", label: "Data intake", role: "dispatcher" },
   { href: "/rider", label: "Rider", role: "rider" },
   { href: "/stops", label: "Stop cards" },
   { href: "/buyer", label: "Buyer simulation", role: "buyer" },
