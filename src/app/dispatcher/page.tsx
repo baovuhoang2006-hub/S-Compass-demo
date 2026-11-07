@@ -9,7 +9,7 @@ import { ShiftRibbon } from "@/components/ShiftRibbon";
 import { StopCardDialog } from "@/components/StopCardDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogClose, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Label, Textarea } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { BACKUP_RIDER, fixtures, historical, riderOfShift } from "@/lib/data";
@@ -44,7 +44,9 @@ export default function DispatcherPage() {
   const { state, update, shift, cards, plan } = useDemo();
   const [filter, setFilter] = React.useState<Filter>("all");
   const [cardOpen, setCardOpen] = React.useState<{ key: string; stopId: string } | null>(null);
-  const [compareOpen, setCompareOpen] = React.useState(false);
+  const impactRef = React.useRef<HTMLDivElement>(null);
+  const [comparisonFocusRequest, requestComparisonFocus] = React.useState(0);
+  const handledComparisonFocus = React.useRef(0);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
   const deliveryTable = React.useRef<HTMLDivElement>(null);
@@ -64,7 +66,6 @@ export default function DispatcherPage() {
   const states = state.stopStates[shift.id];
   const stopById = Object.fromEntries(shift.stops.map((s) => [s.id, s]));
 
-  const rows: (PlannedStop | null)[] = shown ? shown.stops : shift.stops.map(() => null);
   const isRisk = (ps: PlannedStop) => states[ps.stopId]?.status === "pending" && (ps.flags.length > 0 || (ps.p !== null && ps.p < 0.65));
   const pendingCount = shift.stops.filter((s) => states[s.id].status === "pending").length;
   const riskCount = shown ? shown.stops.filter(isRisk).length : 0;
@@ -82,15 +83,26 @@ export default function DispatcherPage() {
     : staleBuyerStops.length
       ? `The draft does not reflect the buyer-confirmed window for ${staleBuyerStops.map((s) => s.stopId).join(", ")}. Generate a new plan.`
       : null;
-  const openComparison = () => {
-    update((s) => comparePlans(s));
-    setCompareOpen(true);
-  };
   const generateProposedPlan = () => update((s) => comparePlans(generatePlan(s, "rules")));
   const comparisonCurrent = state.comparisonMeta?.runId === comparisonRunIdFor(state);
   const baselinePlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "baseline") : undefined;
   const rulesPlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "rules") : undefined;
-  const projectedImpactReady = !!(draft?.method === "rules" && baselinePlan && rulesPlan && planInputSignature(draft) === planInputSignature(rulesPlan));
+  const comparisonReady = !!(baselinePlan && rulesPlan && state.comparisonMeta);
+  const comparedDraft = state.comparison?.find((p) => p.method === draft?.method);
+  const draftAligned = !draft || !!(comparedDraft && planInputSignature(draft) === planInputSignature(comparedDraft));
+  const focusComparison = () => {
+    if (!comparisonReady) update((s) => comparePlans(s));
+    requestComparisonFocus((n) => n + 1);
+  };
+  React.useEffect(() => {
+    if (!comparisonReady || comparisonFocusRequest === handledComparisonFocus.current) return;
+    const target = impactRef.current;
+    if (target) {
+      target.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" });
+      target.focus({ preventScroll: true });
+      handledComparisonFocus.current = comparisonFocusRequest;
+    }
+  }, [comparisonReady, comparisonFocusRequest]);
 
   const shownRows = shown
     ? shown.stops.filter((ps) => {
@@ -150,8 +162,8 @@ export default function DispatcherPage() {
             <Button variant="primary" onClick={generateProposedPlan}>
               <Sparkles /> Generate Proposed Plan
             </Button>
-            <Button onClick={openComparison}>
-              <BarChart3 /> Compare plans
+            <Button onClick={focusComparison}>
+              <BarChart3 /> Compare Plans
             </Button>
             {draft ? (
               <Button variant="dark" disabled={!!dispatchBlockReason} title={dispatchBlockReason ?? "Dispatch this draft plan"} onClick={() => update((s) => dispatchPlan(s, draft))}>
@@ -161,7 +173,7 @@ export default function DispatcherPage() {
           </div>
         </div>
         <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-          Rules-based is the best-supported operating method in the current evidence; Model remains experimental. This is a simulated plan, not a measured delivery outcome. <Link href="/how-it-works" className="text-info underline underline-offset-2">How it works</Link>
+          Default: Rules-based · Experimental Model available in detailed comparison · Drafts require dispatcher review.
         </p>
       </Panel>
 
@@ -186,7 +198,7 @@ export default function DispatcherPage() {
           ) : (
             <p className="px-4 py-6 text-sm text-ink-faint">No draft or dispatched plan yet.</p>
           )}
-          <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Source: de-identified delivery history · Method: {shown ? METHOD_LABEL[shown.method] : "not run"}. <button className="text-info underline" onClick={openComparison}>View detailed comparison</button></p>
+          <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Source: de-identified delivery history · Method: {shown ? METHOD_LABEL[shown.method] : "not run"}.</p>
         </Panel>
         <Panel>
           <PanelHeader title="Delivery progress" note="Actions in this demo session" actions={<SourceTag kind="live" />} />
@@ -195,16 +207,18 @@ export default function DispatcherPage() {
         </Panel>
       </div>
 
-      {projectedImpactReady && baselinePlan && rulesPlan && state.comparisonMeta ? (
-        <ProjectedImpact baseline={baselinePlan} rules={rulesPlan} sampleSize={state.comparisonMeta.eligibleEstimatedStops} totalPending={state.comparisonMeta.totalStops} onDetails={openComparison} />
-      ) : draft ? (
-        <Panel className="border-warn/50 bg-warn-tint/30 px-4 py-3" role="status">
-          <p className="text-sm font-medium">Projected Impact is out of date.</p>
-          <p className="mt-1 text-xs text-ink-soft">The rider, stops, buyer commitments or draft changed. Generate a new proposed plan to refresh the comparison.</p>
-        </Panel>
-      ) : null}
+      <div ref={impactRef} id="projected-impact" role="region" aria-label="Projected Impact" tabIndex={-1} className="scroll-mt-48 rounded-xl sm:scroll-mt-28">
+        {comparisonReady && baselinePlan && rulesPlan && state.comparisonMeta ? (
+          <ProjectedImpact key={state.comparisonMeta.runId} baseline={baselinePlan} rules={rulesPlan} sampleSize={state.comparisonMeta.eligibleEstimatedStops} totalPending={state.comparisonMeta.totalStops} draftAligned={draftAligned} />
+        ) : draft || state.comparison ? (
+          <Panel className="border-warn/50 bg-warn-tint/30 px-4 py-3" role="status">
+            <p className="text-sm font-medium">Projected Impact is out of date.</p>
+            <p className="mt-1 text-xs text-ink-soft">Inputs changed. Select Compare Plans to refresh the comparison, or Generate Proposed Plan for a new Rules-based draft.</p>
+          </Panel>
+        ) : null}
+      </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="space-y-3">
         <Panel className="px-4 py-3"><details className="ui-disclosure"><summary className="cursor-pointer font-medium">Fixed historical data · {historical.orders.toLocaleString()} orders</summary><div className="space-y-4 pt-4">
           <p className="text-sm text-ink-soft">Observed outcomes from {historical.period.from} to {historical.period.to}. Business targets come from the BCE004 Proposal; they are goals, not measured achievements. Draft-plan estimates are simulated separately above.</p>
           <div className="grid grid-cols-2 gap-4">
@@ -215,13 +229,15 @@ export default function DispatcherPage() {
             <Stat label="Selected rider-day actual outcome" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "No actual outcome available"} sub={shift.actualDatasetOutcome.attempts ? "Delivered / actual delivery attempts in dataset" : "No recorded outcome for this rider-day"} />
           </div>
         </div></details></Panel>
-        <Panel className="px-4 py-3"><details className="ui-disclosure"><summary className="cursor-pointer font-medium">Methodology &amp; Data Sources</summary><dl className="space-y-3 pt-4 text-sm">
-          <div><dt className="font-semibold">Default method</dt><dd className="mt-1 text-ink-soft">Rules-based uses historical success by delivery block, verified site rules, buyer confirmations and capacity. It is the best-supported operating method in the current evidence.</dd></div>
-          <div><dt className="font-semibold">Data provenance</dt><dd className="mt-1 text-ink-soft">Dataset = recorded history. Simulated = planned estimates. Live demo = actions recorded in this browser session.</dd></div>
-          <div><dt className="font-semibold">KPI denominators</dt><dd className="mt-1 text-ink-soft">Expected first attempts use the same eligible estimated stops across methods. Scheduled / total shows every pending order. Minutes per parcel includes travel, entrance search and service, and is comparable only when all pending orders are scheduled.</dd></div>
-          <div><dt className="font-semibold">Experimental Model</dt><dd className="mt-1 text-ink-soft">Logistic Regression predictions are separate from the common history-table score. Predictions and simulated estimates are not observed outcomes.</dd></div>
-          <div><dt className="font-semibold">Route and time assumptions</dt><dd className="mt-1 text-ink-soft">Anonymized coordinates and straight-line distance × 1.3; travel times and block boundaries use existing demo assumptions. These are not street directions or measured traffic conditions.</dd></div>
-        </dl><p className="pt-4 text-sm"><Link href="/how-it-works" className="text-info underline">Read the full methodology</Link></p></details></Panel>
+        <details className="ui-disclosure text-sm">
+          <summary className="w-fit cursor-pointer rounded-md px-1 py-1 font-medium text-info">How are these estimates calculated?</summary>
+          <div className="max-w-2xl space-y-2 px-1 pt-2 text-ink-soft">
+            <p><b>Historical Dataset:</b> observed delivery outcomes.</p>
+            <p><b>Simulated:</b> planner estimates, not measured results.</p>
+            <p><b>Model:</b> experimental Logistic Regression prediction, shown separately.</p>
+            <p><Link href="/how-it-works" className="text-info underline">How it works — full methodology</Link></p>
+          </div>
+        </details>
       </div>
 
       {openProposal || pendingCorrections.length ? (
@@ -424,7 +440,7 @@ export default function DispatcherPage() {
               <RouteMap key={shift.id} riderId={rider.id} plan={shown} states={states} selected={selected} onSelect={selectDelivery} locations={Object.fromEntries(shift.stops.map((s) => [s.id, cards[s.locationKey].name]))} />
             </div>
           </Panel>
-          {selected && shown ? <SelectedStop ps={shown.stops.find((x) => x.stopId === selected)} onOpen={() => setCardOpen({ key: stopById[selected].locationKey, stopId: selected })} /> : null}
+
           {transferred.length ? (
             <Panel>
               <PanelHeader title={BACKUP_RIDER} note="Parcels moved here by the dispatcher" />
@@ -440,7 +456,6 @@ export default function DispatcherPage() {
       </div>
 
       <StopCardDialog cardKey={cardOpen?.key ?? null} stopId={cardOpen?.stopId} open={!!cardOpen} onOpenChange={(o) => !o && setCardOpen(null)} from="dispatcher list" />
-      <CompareDialog open={compareOpen} onOpenChange={setCompareOpen} />
       <TransferDialog stopId={transferStop} riderName={rider.label} onClose={() => setTransferStop(null)} onConfirm={(note) => transferStop && update((s) => transferParcel(s, transferStop, note))} />
     </div>
   );
@@ -450,7 +465,9 @@ function signed(value: number, digits = 1) {
   return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}`;
 }
 
-function ProjectedImpact({ baseline, rules, sampleSize, totalPending, onDetails }: { baseline: Plan; rules: Plan; sampleSize: number; totalPending: number; onDetails: () => void }) {
+function ProjectedImpact({ baseline, rules, sampleSize, totalPending, draftAligned }: { baseline: Plan; rules: Plan; sampleSize: number; totalPending: number; draftAligned: boolean }) {
+  const [expanded, setExpanded] = React.useState(false);
+  const detailId = React.useId();
   const baselineMinutes = onRoadMinutesPerParcel(baseline);
   const rulesMinutes = onRoadMinutesPerParcel(rules);
   const minutesComparable = baselineMinutes !== null && rulesMinutes !== null && baseline.totals.stops === rules.totals.stops;
@@ -469,6 +486,7 @@ function ProjectedImpact({ baseline, rules, sampleSize, totalPending, onDetails 
   return <Panel className="overflow-hidden">
     <PanelHeader title="Projected Impact — Simulated Estimates" note="Projected plan comparison" actions={<SourceTag kind="simulated" />} />
     <p className="px-4 pt-3 text-sm text-ink-soft">Comparison uses the same rider, parcels and historical success scorer. Results are simulated estimates, not measured delivery outcomes.</p>
+    {!draftAligned ? <p role="status" className="mx-4 mt-3 rounded-md bg-warn-tint p-3 text-sm text-warn">This comparison uses current inputs; the existing draft differs. Choose Use as draft in the detailed comparison or generate a new proposed plan before dispatch review.</p> : null}
     <div className="grid gap-3 p-4 md:grid-cols-2">
       <div className="rounded-lg border border-line bg-canvas/60 p-4">
         <h3 className="font-semibold">Before · Baseline</h3>
@@ -488,8 +506,9 @@ function ProjectedImpact({ baseline, rules, sampleSize, totalPending, onDetails 
     {!minutesComparable ? <p role="status" className="px-4 pb-3 text-xs text-warn">{stopTimeReason} Per-parcel time is shown as Not comparable when any pending stop is unscheduled or denominators differ.</p> : null}
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line px-4 py-3 text-xs text-ink-faint">
       <span>Sample: {totalPending} total pending stops · {sampleSize} common eligible estimates. Baseline and Rules use the same start conditions.</span>
-      <Button variant="outline" onClick={onDetails}><BarChart3 /> View Detailed Comparison</Button>
+      <Button variant="outline" aria-expanded={expanded} aria-controls={detailId} onClick={() => setExpanded((value) => !value)}><BarChart3 /> {expanded ? "Hide Detailed Comparison" : "View Detailed Comparison"}</Button>
     </div>
+    {expanded ? <div id={detailId} className="ui-reveal border-t border-line p-4"><ComparisonDetails /></div> : null}
   </Panel>;
 }
 
@@ -503,36 +522,7 @@ function ImpactMetrics({ plan, minutes }: { plan: Plan; minutes: number | null }
   </dl>;
 }
 
-function SelectedStop({ ps, onOpen }: { ps?: PlannedStop; onOpen: () => void }) {
-  if (!ps) return null;
-  return (
-    <Panel>
-      <PanelHeader title={`Why ${ps.stopId} is planned here`} actions={<Button size="sm" onClick={onOpen}>Open stop card</Button>} />
-      <div className="space-y-2 px-4 py-3 text-sm">
-        <p>
-          <BlockTag block={ps.block} eta={ps.arriveMin} /> · going to the <span className="font-medium">{ps.pointSource}</span>
-        </p>
-        <ul className="list-disc space-y-1 pl-5 text-ink-soft">
-          {ps.reasons.map((r) => (
-            <li key={r}>{r}</li>
-          ))}
-        </ul>
-        {ps.flags.length ? (
-          <ul className="space-y-1 text-bad">
-            {ps.flags.map((f) => (
-              <li key={f}>{f}</li>
-            ))}
-          </ul>
-        ) : null}
-        <p className="text-xs text-ink-faint">
-          Simulated: travel {Math.round(ps.travelMin)} min, entrance search {ps.searchMin} min, service {ps.serviceMin} min.
-        </p>
-      </div>
-    </Panel>
-  );
-}
-
-function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+function ComparisonDetails() {
   const { state, update } = useDemo();
   const plans = state.comparison ?? [];
   const meta = state.comparisonMeta;
@@ -551,8 +541,8 @@ function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
     { label: "Planner run time", get: (p) => `${p.computeMs} ms` },
   ];
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Compare plans" description="Same parcels, same rider, same start. All figures are simulated estimates, not measured results." wide>
+    <section aria-label="Detailed Comparison">
+      <h3 className="mb-3 font-semibold">Detailed Comparison · Simulated estimates</h3>
         {plans.length ? (
           <>
             {meta ? <div className="mb-3 rounded-lg border border-line bg-canvas p-3 text-xs text-ink-soft">
@@ -561,7 +551,8 @@ function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
               <div><b>KPI method:</b> {meta.successMetric} <span className="font-medium">· SIMULATED</span></div>
               <div><b>Run time:</b> {new Date(meta.createdAt).toLocaleString()}</div>
             </div> : null}
-            <div className="overflow-x-auto">
+            <p className="mb-2 text-xs text-ink-soft sm:hidden">Swipe the table to see Rules-based and Model.</p>
+            <div className="overflow-x-auto overscroll-x-contain rounded-md" role="region" aria-label="Comparison metrics table" tabIndex={0}>
               <table className="w-full min-w-[640px] text-sm">
                 <thead>
                   <tr className="border-b border-line text-left">
@@ -591,31 +582,27 @@ function CompareDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o
                     <td className="py-3 pr-3 text-ink-faint">Use as draft</td>
                     {plans.map((p) => (
                       <td key={p.method} className="py-3 pr-3">
-                        <DialogClose asChild>
-                          <Button size="sm" variant={p.method === "rules" ? "primary" : "outline"} onClick={() => update((s) => ({ ...s, method: p.method, draftPlan: p }))}>
+                          <Button size="sm" aria-pressed={state.draftPlan?.id === p.id} variant={p.method === "rules" ? "primary" : "outline"} onClick={() => update((s) => ({ ...s, method: p.method, draftPlan: p }))}>
                             Use {p.method === "model" ? "model" : p.method}
                           </Button>
-                        </DialogClose>
                       </td>
                     ))}
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div className="mt-4 rounded-lg bg-canvas p-3 text-sm text-ink-soft">
-              <p className="font-medium text-ink">How to read this</p>
-              <p className="mt-1">
-                The rules plan moves school and office stops out of the evening, where the dataset shows the weakest success, at the cost of more kilometres.
-                The model plan uses the same constraints with a learned success model; on held-out October data it was not more accurate than the history table, so its
-                small differences here are not evidence that AI is better. The pilot is designed to test that question.
-              </p>
+            <div className="mt-4 space-y-2 rounded-lg bg-canvas p-3 text-sm text-ink-soft">
+              <p><b className="text-ink">Method:</b> Baseline follows nearest map pins. Rules-based uses delivery history and operational constraints. Model uses experimental Logistic Regression with the same constraints.</p>
+              <p><b className="text-ink">Assumptions:</b> straight-line distance × 1.3; travel, entrance search and service use existing demo assumptions. Per-parcel time requires every pending order to be scheduled.</p>
+              <p>Model predictions are separate from the common history-table score. Held-out October evaluation did not show the Model to be more accurate than the history table.</p>
+              <Link className="text-info underline" href="/how-it-works">How it works — methodology and evaluation</Link>
             </div>
+            {state.draftPlan ? <p role="status" className="mt-3 text-sm text-ink-soft">Current draft: <b>{METHOD_LABEL[state.draftPlan.method]}</b>. Review the delivery schedule before dispatch.</p> : null}
           </>
         ) : (
-          <p className="text-sm text-ink-faint">Run Compare plans to see the three methods side by side.</p>
+          <p className="text-sm text-ink-faint">Run Compare Plans to see the three methods side by side.</p>
         )}
-      </DialogContent>
-    </Dialog>
+    </section>
   );
 }
 

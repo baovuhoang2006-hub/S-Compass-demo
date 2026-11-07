@@ -51,35 +51,53 @@ export function StopCardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Stop Card Details" description={`${card.name} · ${TYPE_LABEL[card.type]}${stop ? ` · Stop ${stop.id}` : ""}`} wide className="sm:max-h-[88vh]">
-        <div className="mb-4 flex flex-wrap items-center gap-2">
+      <DialogContent title={card.name} description={`${TYPE_LABEL[card.type]} · Location ID: ${card.key}${stop ? ` · Stop ${stop.id}` : ""}`} wide className="sm:max-h-[88vh]">
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
           <CardStatusBadge status={card.status} />
-          <span className="text-sm text-ink-faint">{card.name}{stop ? ` · Stop ${stop.id}` : ""}</span>
-          {overlay?.verificationRequested && card.status !== "verified" ? <span className="text-sm text-warn">Rider confirmed on site — waiting for dispatcher review.</span> : null}
-          {card.status === "disputed" && overlay?.disputeReason ? <span className="text-sm text-bad">Disputed: {overlay.disputeReason}</span> : null}
+          <SourceTag kind={card.source.startsWith("Demo fixture") ? "fixture" : card.source.startsWith("Dataset") ? "dataset" : "live"} />
+          {card.lastVerified ? <span className="text-ink-soft">Last verified: {card.lastVerified}</span> : null}
         </div>
-        {card.temporaryClosure ? (
-          <div role="status" className="mb-4 flex gap-2 rounded-lg bg-bad-tint px-3 py-2 text-sm text-bad">
-            <TriangleAlert className="mt-0.5 size-4 shrink-0" /> {card.temporaryClosure.text}
-          </div>
-        ) : null}
-        <div className="grid gap-5 md:grid-cols-[minmax(0,1.5fr)_minmax(260px,1fr)]">
-          <div className="space-y-4 text-sm">
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Location &amp; Entrance</h3><p className="font-medium">{card.name} · {TYPE_LABEL[card.type]}</p>{stop ? <p className="text-xs text-ink-faint">Stop {stop.id}</p> : null}<Row icon={<DoorOpen />} label="Suggested entrance"><p className="font-medium">{card.entrance}</p>{card.alternateEntrance ? <p className="text-ink-soft">Alternate: {card.alternateEntrance}</p> : null}<p className="mt-1 text-xs text-ink-faint">{card.entranceSource}</p></Row><Row icon={<Timer />} label="Estimated service time"><p>{stop?.serviceMinutes ?? card.serviceMinutes ?? "—"} min <span className="text-xs text-ink-faint">{stop?.serviceMinutes != null ? "(this order's processing-time field)" : "(site median from dataset)"}</span></p></Row></section>
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Handover Instructions</h3><Row icon={<MapPin />} label="Instructions"><p>{card.handover}</p></Row></section>
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Receiving Windows</h3>{card.receivingWindows.length ? <ul className="list-disc space-y-1 pl-5">{card.receivingWindows.map((w) => <li key={w}>{w}</li>)}</ul> : <p className="text-ink-faint">No receiving window recorded.</p>}</section>
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Rules &amp; Restrictions</h3>{card.restrictions.length ? <ul className="space-y-1">{card.restrictions.map((r) => <li key={r.code + r.text}><span className={cn("font-medium", r.strength === "hard" ? "text-ok" : "text-warn")}>{r.strength === "hard" ? "Verified rule — planner must respect" : "Unverified recommendation — planner prefers"}</span>: {r.text} <span className="text-xs text-ink-faint">({r.source})</span></li>)}</ul> : <p className="text-ink-faint">No rules recorded.</p>}{card.access.length ? <div className="mt-2"><b>Access restrictions</b><ul className="list-disc pl-5">{card.access.map((a) => <li key={a}>{a}</li>)}</ul></div> : null}<p className="mt-2 text-xs text-ink-faint">Verified rules constrain a new plan. Unverified suggestions are preferences only.</p></section>
-          </div>
+        {overlay?.verificationRequested && card.status !== "verified" ? <p role="status" className="mb-3 rounded-md bg-warn-tint p-3 text-sm text-warn">On-site confirmation is waiting for dispatcher review.</p> : null}
+        {card.status === "disputed" && overlay?.disputeReason ? <p className="mb-3 rounded-md bg-bad-tint p-3 text-sm text-bad">Disputed: {overlay.disputeReason}</p> : null}
+        {card.temporaryClosure ? <div role="status" className="mb-4 flex gap-2 rounded-lg bg-bad-tint p-3 text-sm text-bad"><TriangleAlert className="mt-0.5 size-4 shrink-0" />{card.temporaryClosure.text}</div> : null}
 
-          <aside className="space-y-4 text-sm">
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Data Source &amp; Verification</h3><div className="flex flex-wrap items-center gap-2"><CardStatusBadge status={card.status} /><SourceTag kind={card.source.startsWith("Demo fixture") ? "fixture" : card.source.startsWith("Dataset") ? "dataset" : "live"} /></div><p className="mt-2 text-ink-soft">{card.source}</p><dl className="mt-2 space-y-1 text-xs"><div><dt className="inline text-ink-faint">Last verified: </dt><dd className="inline">{card.lastVerified ?? "Not verified"}{card.verifiedBy ? ` by ${card.verifiedBy}` : ""}</dd></div><div><dt className="inline text-ink-faint">Entrance source: </dt><dd className="inline">{card.entranceSource}</dd></div></dl></section>
-            <section className="rounded-lg border border-line p-3"><h3 className="mb-2 font-semibold">Historical Delivery Information</h3><table className="w-full text-xs"><thead className="text-ink-faint"><tr><th className="text-left font-normal">Block</th><th className="text-right font-normal">Weekday</th><th className="text-right font-normal">Weekend</th></tr></thead><tbody>{BLOCKS.map((b) => {const wd = card.windowHistory[`${b.id}|weekday`];const we = card.windowHistory[`${b.id}|weekend`];return <tr key={b.id}><td className="py-0.5">{b.label}</td><td className="text-right">{wd?.attempts ? `${wd.delivered}/${wd.attempts}` : "—"}</td><td className="text-right">{we?.attempts ? `${we.delivered}/${we.attempts}` : "—"}</td></tr>;})}</tbody></table><p className="mt-2 text-[11px] text-ink-faint">Delivered/attempts. Dataset visits (Sep 2026) plus outcomes recorded in this demo.</p>{card.pastIssues.length ? <div className="mt-3"><b>Past issues noted by riders</b><ul className="mt-1 space-y-0.5 text-ink-soft">{card.pastIssues.map((i) => <li key={i.text}>{i.text} <span className="text-ink-faint">×{i.count}</span></li>)}</ul></div> : null}</section>
-          </aside>
+        <h3 className="mb-3 font-semibold">Delivery Instructions</h3>
+        <div className="grid gap-4 text-sm md:grid-cols-2">
+          <section className="space-y-4 rounded-lg border border-line p-4"><dl className="space-y-4">
+            <Row icon={<DoorOpen />} label="Entrance"><p className="font-medium">{card.entrance}</p>{card.alternateEntrance ? <p className="mt-1 text-ink-soft">Alternate entrance: {card.alternateEntrance}</p> : null}</Row>
+            <Row icon={<MapPin />} label="Handover point"><p>{card.handover}</p></Row>
+          </dl></section>
+          <section className="space-y-4 rounded-lg border border-line p-4">
+            <div><h4 className="mb-2 font-semibold">Receiving windows &amp; rules</h4>
+              {card.receivingWindows.length || card.restrictions.length ? <ul className="space-y-2">{card.receivingWindows.map((text) => {
+                const restriction = card.restrictions.find((r) => r.text === text);
+                return <li key={text}><p>{text}</p>{restriction ? <span className={cn("text-xs font-medium", restriction.strength === "hard" ? "text-ok" : "text-warn")}>{restriction.strength === "hard" ? "Verified rule" : "Unverified recommendation"}</span> : null}</li>;
+              })}{card.restrictions.filter((r) => !card.receivingWindows.includes(r.text)).map((r) => <li key={r.code + r.text}><p>{r.text}</p><span className={cn("text-xs font-medium", r.strength === "hard" ? "text-ok" : "text-warn")}>{r.strength === "hard" ? "Verified rule" : "Unverified recommendation"}</span></li>)}</ul> : <p className="text-ink-soft">No receiving window recorded.</p>}
+            </div>
+            <div><h4 className="mb-1 font-semibold">Access restrictions</h4>{card.access.length ? <ul className="list-disc space-y-1 pl-5">{card.access.map((text) => <li key={text}>{text}</li>)}</ul> : <p className="text-ink-soft">No access restriction recorded.</p>}</div>
+          </section>
         </div>
+        {card.pastIssues.length ? <section className="mt-4 rounded-lg bg-canvas/70 p-3 text-sm"><h4 className="mb-1 font-semibold">Past delivery issues</h4><ul className="list-disc space-y-1 pl-5 text-ink-soft">{card.pastIssues.slice(0, 3).map((issue) => <li key={issue.text}>{issue.text}</li>)}</ul><p className="mt-2 text-xs text-ink-faint">Full issue counts and supporting history are in Advanced Details.</p></section> : null}
 
-        <section className="mt-4 rounded-lg border border-warn/40 bg-warn-tint/30 p-3"><h3 className="mb-2 font-semibold">Pending Corrections</h3>{pending.length ? <ul className="space-y-2">{pending.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span><b>{c.field.replace("_", " ")}</b>: {c.text} <span className="text-ink-faint">— {c.proposedBy}</span></span>{isDispatcher ? <span className="flex gap-2"><Button size="sm" variant="ok" onClick={() => {update((s) => decideCorrection(s, c.id, true));setActionNotice("Correction approved. Review and generate a new plan before dispatch; the current dispatched route and buyer commitments are unchanged.");}}><Check /> Approve</Button><Button size="sm" variant="danger" onClick={() => {update((s) => decideCorrection(s, c.id, false, "Rejected in stop card"));setActionNotice("Correction rejected. The card and active plan remain unchanged.");}}><X /> Reject</Button></span> : <span className="text-xs text-ink-faint">Switch demo role to Dispatcher to review.</span>}</li>)}</ul> : <p className="text-sm text-ink-faint">No pending corrections.</p>}</section>
+        {pending.length ? <section className="mt-4 rounded-lg border border-warn/40 bg-warn-tint/30 p-3"><h3 className="mb-2 font-semibold">Pending corrections</h3><ul className="space-y-2">{pending.map((c) => <li key={c.id} className="flex flex-wrap items-center justify-between gap-2 text-sm"><span><b>{c.field.replace("_", " ")}</b>: {c.text} <span className="text-ink-faint">— {c.proposedBy}</span></span>{isDispatcher ? <span className="flex gap-2"><Button size="sm" variant="ok" onClick={() => {update((s) => decideCorrection(s, c.id, true));setActionNotice("Correction approved. Review and generate a new plan before dispatch; the current dispatched route and buyer commitments are unchanged.");}}><Check /> Approve</Button><Button size="sm" variant="danger" onClick={() => {update((s) => decideCorrection(s, c.id, false, "Rejected in stop card"));setActionNotice("Correction rejected. The card and active plan remain unchanged.");}}><X /> Reject</Button></span> : <span className="text-xs text-ink-faint">Switch demo role to Dispatcher to review.</span>}</li>)}</ul></section> : null}
         {actionNotice ? <p role="status" className="mt-3 rounded-lg bg-info-tint px-3 py-2 text-sm text-info">{actionNotice}</p> : null}
-        <section className="mt-4 border-t border-line pt-4"><h3 className="mb-3 font-semibold">Dispatcher Actions</h3><CardActions cardKey={cardKey} /></section>
+        <section className="mt-4 border-t border-line pt-4"><h3 className="mb-3 font-semibold">{isDispatcher ? "Dispatcher actions" : "Actions"}</h3><CardActions cardKey={cardKey} /></section>
+
+        <details className="ui-disclosure mt-5 rounded-lg border border-line p-3">
+          <summary className="cursor-pointer font-medium">Advanced Details</summary>
+          <div className="space-y-4 pt-4 text-sm">
+            <section><h4 className="mb-2 font-semibold">Data Source &amp; Verification</h4><p className="text-ink-soft">{card.source}</p><dl className="mt-2 space-y-2 text-xs">
+              <div><dt className="font-medium">Latest verification record</dt><dd className="text-ink-soft">{card.lastVerified ?? "Not verified"}{card.verifiedBy ? ` by ${card.verifiedBy}` : ""} · Status: {card.status}</dd></div>
+              <div><dt className="font-medium">Entrance evidence</dt><dd className="text-ink-soft">{card.entranceSource}</dd></div>
+              {card.entrancePoint ? <div><dt className="font-medium">Anonymized entrance coordinates</dt><dd className="text-ink-soft">{card.entrancePoint.join(", ")}</dd></div> : null}
+              {card.pinSpreadMeters !== null ? <div><dt className="font-medium">Dataset pin spread</dt><dd className="text-ink-soft">{card.pinSpreadMeters} m</dd></div> : null}
+            </dl><p className="mt-2 text-xs text-ink-faint">Latest verification is shown here; review actions are recorded in Evidence.</p></section>
+            <section><h4 className="mb-2 font-semibold">Rules &amp; supporting evidence</h4>{card.restrictions.length ? <ul className="space-y-2 text-ink-soft">{card.restrictions.map((r) => <li key={r.code + r.text}><p>{r.text}</p><p className="text-xs">{r.strength === "hard" ? "Verified rule — planner must respect" : "Unverified recommendation — planner prefers"} · {r.source}</p></li>)}</ul> : <p className="text-ink-soft">No rule evidence recorded.</p>}<p className="mt-2 text-xs text-ink-faint">Verification applies to the next plan. Existing dispatched routes and buyer commitments are preserved.</p></section>
+            <section><dl><Row icon={<Timer />} label="Estimated service time"><p>{stop?.serviceMinutes ?? card.serviceMinutes ?? "—"} min <span className="text-xs text-ink-soft">{stop?.serviceMinutes != null ? "(this order's processing-time field)" : "(site median from dataset)"}</span></p></Row></dl></section>
+            <section><h4 className="mb-2 font-semibold">Historical Delivery Information</h4><table className="w-full text-xs"><thead className="text-ink-soft"><tr><th className="text-left font-normal">Block</th><th className="text-right font-normal">Weekday</th><th className="text-right font-normal">Weekend</th></tr></thead><tbody>{BLOCKS.map((b) => {const wd = card.windowHistory[`${b.id}|weekday`];const we = card.windowHistory[`${b.id}|weekend`];return <tr key={b.id}><td className="py-1">{b.label}</td><td className="text-right">{wd?.attempts ? `${wd.delivered}/${wd.attempts}` : "—"}</td><td className="text-right">{we?.attempts ? `${we.delivered}/${we.attempts}` : "—"}</td></tr>;})}</tbody></table><p className="mt-2 text-xs text-ink-faint">Delivered/attempts. Dataset visits (Sep 2026) plus outcomes recorded in this demo.</p></section>
+            <section><h4 className="mb-2 font-semibold">Full historical issue counts</h4>{card.pastIssues.length ? <ul className="space-y-1 text-ink-soft">{card.pastIssues.map((issue) => <li key={issue.text}>{issue.text} <span className="text-ink-faint">×{issue.count}</span></li>)}</ul> : <p className="text-ink-soft">No past issues recorded.</p>}</section>
+          </div>
+        </details>
       </DialogContent>
     </Dialog>
   );
@@ -122,7 +140,7 @@ function CardActions({ cardKey }: { cardKey: string }) {
   };
 
   return (
-    <div className="mt-5 border-t border-line pt-4">
+    <div>
       {done ? (
         <p role="status" className="mb-3 rounded-lg bg-ok-tint px-3 py-2 text-sm text-ok">
           {done}
