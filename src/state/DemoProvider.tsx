@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { fixtures, loadImportedLocal, saveImportedLocal, setImported, shiftById } from "@/lib/data";
-import { cardsFor, ensureShiftState, initialState, log, type DemoState } from "@/lib/demoState";
+import { cardsFor, ensureShiftState, initialState, log, restoreKnowledgeReviews, type DemoState } from "@/lib/demoState";
 import { getAdapter, type PersistenceAdapter, type SaveResult } from "@/lib/persistence";
 import type { Plan, Shift, StopCard } from "@/lib/types";
 
@@ -37,7 +37,7 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
         if (imported) setImported(imported);
         let next = s ?? initialState();
         if (!fixtures.shifts.some((x) => x.id === next.shiftId)) next = { ...next, shiftId: fixtures.shifts.find((x) => !x.id.startsWith("imp-"))?.id ?? fixtures.shifts[0].id };
-        setState(ensureShiftState(next, next.shiftId));
+        setState(restoreKnowledgeReviews(ensureShiftState(next, next.shiftId)));
       })
       .catch((e: Error) => {
         if (!alive) return;

@@ -1,0 +1,43 @@
+{
+  "sample": {
+    "import": true,
+    "quarantinedExcluded": true,
+    "originalPreservedAndDuplicateCopyExcluded": true,
+    "capacity": true,
+    "columnRecognition": true,
+    "eligible": 74,
+    "riderDays": 2,
+    "noDuplicates": true,
+    "dispatcherNavigation": true,
+    "evidence": true,
+    "errors": []
+  },
+  "csv": {
+    "import": true,
+    "quarantinedExcluded": true,
+    "originalPreservedAndDuplicateCopyExcluded": true,
+    "capacity": true,
+    "columnRecognition": true,
+    "eligible": 74,
+    "riderDays": 2,
+    "noDuplicates": true,
+    "dispatcherNavigation": true,
+    "evidence": true,
+    "errors": []
+  },
+  "xlsx": {
+    "import": true,
+    "quarantinedExcluded": true,
+    "originalPreservedAndDuplicateCopyExcluded": true,
+    "capacity": true,
+    "columnRecognition": true,
+    "eligible": 74,
+    "riderDays": 2,
+    "noDuplicates": true,
+    "dispatcherNavigation": true,
+    "evidence": true,
+    "errors": []
+  },
+  "invalidUploadRejected": true,
+  "laterDateReattemptRemainsEligible": true
+}

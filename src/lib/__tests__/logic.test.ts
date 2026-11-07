@@ -134,8 +134,8 @@ describe("planner", () => {
 
   it("verified weekend closure on Saturday flags office stops instead of dropping them", () => {
     let s = selectShift(initialState(), "shift-sat");
-    s = { ...s, role: "dispatcher" };
-    s = verifyCard(s, "loc-01");
+    s = verifyCard({ ...s, role: "rider" }, "loc-01");
+    s = decideCorrection({ ...s, role: "dispatcher" }, s.corrections[0].id, true);
     const plan = planFor(s, "rules");
     const officeStops = shiftById("shift-sat").stops.filter((x) => x.locationKey === "loc-01");
     for (const o of officeStops) {

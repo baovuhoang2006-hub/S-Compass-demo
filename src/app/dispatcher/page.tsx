@@ -6,7 +6,6 @@ import * as React from "react";
 import { BlockTag, CardStatusBadge, ChanceText, EmptyState, MethodBadge, SourceTag, Stat, TYPE_LABEL } from "@/components/bits";
 import { RouteMap } from "@/components/RouteMap";
 import { ShiftRibbon } from "@/components/ShiftRibbon";
-import { StopCardDialog } from "@/components/StopCardDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -43,7 +42,6 @@ function planInputSignature(plan: Plan) {
 export default function DispatcherPage() {
   const { state, update, shift, cards, plan } = useDemo();
   const [filter, setFilter] = React.useState<Filter>("all");
-  const [cardOpen, setCardOpen] = React.useState<{ key: string; stopId: string } | null>(null);
   const [compareOpen, setCompareOpen] = React.useState(false);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
@@ -192,7 +190,7 @@ export default function DispatcherPage() {
         <Panel>
           <PanelHeader title="Delivery progress" note="Actions in this demo session" actions={<SourceTag kind="live" />} />
           <div className="px-4 py-3"><Stat label="Stops completed" value={`${doneCount} / ${shift.stops.length}`} sub={`${shift.stops.filter((s) => states[s.id].status === "delivered").length} delivered · ${shift.stops.filter((s) => states[s.id].status === "failed").length} failed`} /></div>
-          <details className="border-t border-line px-4 py-3"><summary className="cursor-pointer font-medium">Demo activity · {m.buyerAnswered} buyer replies · {pendingCorrections.length + (openProposal ? 1 : 0)} decisions waiting</summary><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Stat label="Buyer replies" value={m.buyerAnswered} sub={`${m.buyerNoResponse} no response`} /><Stat label="Corrections" value={`${m.correctionsApproved} approved`} sub={`${pendingCorrections.length} waiting`} /><Stat label="Plan changes" value={`${m.replansAccepted} accepted`} sub={`${m.replansOverridden} overridden`} /></div></details>
+          <details className="border-t border-line px-4 py-3"><summary className="cursor-pointer font-medium">Demo activity · {m.buyerAnswered} buyer replies · {pendingCorrections.length + (openProposal ? 1 : 0)} decisions waiting</summary><div className="mt-3 grid grid-cols-2 gap-3 text-sm"><Stat label="Buyer replies" value={m.buyerAnswered} sub={`${m.buyerNoResponse} no response`} /><Stat label="Corrections" value={`${m.correctionsApproved} approved`} sub={`${pendingCorrections.filter((c) => c.field !== "confirmation" && c.field !== "dispute").length} waiting`} /><Stat label="Plan changes" value={`${m.replansAccepted} accepted`} sub={`${m.replansOverridden} overridden`} /></div></details>
         </Panel>
       </div>
 
@@ -316,7 +314,7 @@ export default function DispatcherPage() {
                               className="text-left font-medium text-info underline-offset-2 hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                setCardOpen({ key: st.locationKey, stopId: ps.stopId });
+                                setSelected(ps.stopId);
                               }}
                             >
                               {card.name}
@@ -354,9 +352,6 @@ export default function DispatcherPage() {
                             )}
                           </td>
                           <td className="px-3 py-2.5 text-right">
-                            <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setSelected(ps.stopId); setCardOpen({ key: st.locationKey, stopId: ps.stopId }); }}>
-                              Review Stop Card
-                            </Button>
                             {ss.status === "pending" && !draft && plan ? (
                               <Button
                                 size="sm"
@@ -401,9 +396,9 @@ export default function DispatcherPage() {
               <ul className="mt-4 grid gap-1 text-sm sm:grid-cols-2">
                 {shift.stops.map((s) => (
                   <li key={s.id} className="flex items-center justify-between rounded-md px-2 py-1 hover:bg-canvas">
-                    <button className="text-left" onClick={() => setCardOpen({ key: s.locationKey, stopId: s.id })}>
+                    <span className="text-left">
                       <span className="font-medium">{s.id}</span> <span className="text-ink-soft">{cards[s.locationKey].name}</span>
-                    </button>
+                    </span>
                     <span className="text-xs text-ink-faint">
                       {TYPE_LABEL[s.locationType]} · {s.payment.toUpperCase()}
                     </span>
@@ -445,7 +440,6 @@ export default function DispatcherPage() {
           </div>}
         </DialogContent>
       </Dialog>
-      <StopCardDialog cardKey={cardOpen?.key ?? null} stopId={cardOpen?.stopId} open={!!cardOpen} onOpenChange={(o) => !o && setCardOpen(null)} from="dispatcher list" />
       <TransferDialog stopId={transferStop} riderName={rider.label} onClose={() => setTransferStop(null)} onConfirm={(note) => transferStop && update((s) => transferParcel(s, transferStop, note))} />
     </div>
   );

@@ -1,0 +1,38 @@
+{
+  "desktop": {
+    "singleModalNoDispatch": true,
+    "allDraftsSingleComparison": true,
+    "generateAndNestedDetails": true,
+    "modalScrollEscapeFocus": true,
+    "originalPlannerReasons": true,
+    "routeColumnsOrder16VisitsAndResize": true,
+    "scheduleSelection": true,
+    "buyerAndStaleRefresh": true,
+    "noDispatcherCardEditing": true,
+    "guardsForAllDraftMethods": true,
+    "replanRiderEvidence": true,
+    "riskABC": true,
+    "riderShiftAndReload": true,
+    "noHorizontalOverflow": true,
+    "javascriptErrors": []
+  },
+  "mobile": {
+    "singleModalNoDispatch": true,
+    "allDraftsSingleComparison": true,
+    "generateAndNestedDetails": true,
+    "modalScrollEscapeFocus": true,
+    "originalPlannerReasons": true,
+    "routeColumnsOrder16VisitsAndResize": true,
+    "scheduleSelection": true,
+    "buyerAndStaleRefresh": true,
+    "noDispatcherCardEditing": true,
+    "guardsForAllDraftMethods": true,
+    "replanRiderEvidence": true,
+    "riskABC": true,
+    "riderShiftAndReload": true,
+    "noHorizontalOverflow": true,
+    "javascriptErrors": []
+  },
+  "openModalInputInvalidation": true,
+  "validInference": "Valid inference p_success=0.859 for morning."
+}

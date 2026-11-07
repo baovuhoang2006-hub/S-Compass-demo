@@ -1,6 +1,6 @@
 import { BACKUP_RIDER, allPickupPoints, fixtures, riderById, riderOfShift, shiftById } from "./data";
 import type { EvidenceEvent, Role } from "./evidence";
-import { applyCorrection, buildCard, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
+import { applyCorrection, buildCard, knowledgeSnapshot, reviewValue, RESTRICTION_PRESETS, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
 import { makePlan } from "./planner";
 import { compareRemaining, type ReplanProposal, type ReplanTrigger } from "./replan";
 import { SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
@@ -47,10 +47,6 @@ export interface DemoState {
 /** Label of the rider who owns a shift, e.g. "Rider A · Minh". */
 export function riderLabel(shiftId: string) {
   return riderOfShift(shiftById(shiftId)).label;
-}
-
-function demoToday(shiftId: string) {
-  return shiftById(shiftId).date;
 }
 
 let counter = 0;
@@ -296,77 +292,91 @@ export function openCard(state: DemoState, key: string, from: string): DemoState
   return log(state, { type: "stop_card_opened", summary: `Opened stop card ${cardsFor(state)[key].name}`, input: from });
 }
 
-export function suggestCorrection(
-  state: DemoState,
-  key: string,
-  field: CorrectionField,
-  text: string,
-  restrictionCode?: WindowRestriction["code"],
-): DemoState {
+/** Upgrade legacy browser confirmation flags without inventing missing evidence. */
+export function restoreKnowledgeReviews(state: DemoState): DemoState {
+  let next = state;
+  for (const [key, overlay] of Object.entries(state.overlays)) {
+    if (!overlay.verificationRequested || !cardsFor(state)[key]) continue;
+    if (next.corrections.some((c) => c.locationKey === key && c.field === "confirmation" && c.status === "pending")) continue;
+    next = { ...next, corrections: [...next.corrections, {
+      id: `legacy-confirmation-${key}`, locationKey: key, field: "confirmation",
+      text: "Legacy on-site confirmation flag; original submission details were not recorded",
+      proposedBy: "Not recorded (legacy demo)", createdAt: "", status: "pending",
+      snapshot: knowledgeSnapshot(cardsFor(state)[key]),
+      provenance: "Restored browser flag; no timestamp or actor inferred. Not a real field inspection.",
+    }] };
+  }
+  return next;
+}
+
+function submitKnowledgeRequest(state: DemoState, key: string, field: Correction["field"], text: string, restrictionCode?: WindowRestriction["code"]): DemoState {
+  const card = cardsFor(state)[key];
+  if (!card || !["dispatcher", "rider"].includes(state.role) || !text.trim()) return state;
+  if ((field === "confirmation" || field === "dispute") && state.role !== "rider") return state;
+  if (field === "confirmation" && state.corrections.some((c) => c.locationKey === key && c.field === field && c.status === "pending")) return state;
   const c: Correction = {
-    id: uid("corr"),
-    locationKey: key,
-    field,
-    text,
-    restrictionCode,
+    id: uid("review"), locationKey: key, field, text: text.trim(), restrictionCode,
     proposedBy: state.role === "rider" ? riderLabel(state.shiftId) : "Dispatcher",
-    createdAt: new Date().toISOString(),
-    status: "pending",
+    createdAt: new Date().toISOString(), status: "pending",
+    snapshot: knowledgeSnapshot(card), previousValue: reviewValue(card, field),
+    provenance: `Browser demo ${state.role} report · session ${state.sessionId}; not independently field-verified`,
   };
-  const s = { ...state, corrections: [...state.corrections, c] };
-  return log(s, {
-    type: "correction_suggested",
-    summary: `Correction for ${cardsFor(state)[key].name}: ${field.replace("_", " ")}`,
-    input: text,
-    output: "Pending dispatcher review; card unchanged until approved",
+  return log({ ...state, corrections: [...state.corrections, c] }, {
+    type: field === "confirmation" ? "verification_requested" : field === "dispute" ? "dispute_reported" : "correction_suggested",
+    summary: `${field === "confirmation" ? "On-site confirmation" : field === "dispute" ? "Dispute report" : "Correction"} for ${card.name}`,
+    input: JSON.stringify(c), output: "Pending dispatcher review; official knowledge and dispatched plans unchanged",
   });
+}
+
+export function suggestCorrection(state: DemoState, key: string, field: CorrectionField, text: string, restrictionCode?: WindowRestriction["code"]): DemoState {
+  if (!["entrance", "handover", "access", "receiving_window"].includes(field)) return state;
+  if (field === "receiving_window" && !RESTRICTION_PRESETS.some((p) => p.code === restrictionCode && p.text === text.trim())) return state;
+  return submitKnowledgeRequest(state, key, field, text, restrictionCode);
+}
+
+/** A stale report must be re-submitted; an unresolved dispute must be reviewed first. */
+export function knowledgeReviewBlocker(state: DemoState, c: Correction): string | null {
+  const card = cardsFor(state)[c.locationKey];
+  if (!card) return "Site no longer available. Reject this request and review the source.";
+  if (!c.text.trim() || !["entrance", "handover", "access", "receiving_window", "confirmation", "dispute"].includes(c.field)) return "Invalid request content. Reject and request a new observation.";
+  if (c.field === "receiving_window" && !RESTRICTION_PRESETS.some((p) => p.code === c.restrictionCode && p.text === c.text.trim())) return "Receiving rule does not match a supported preset. Reject and resubmit.";
+  if (c.field !== "dispute" && state.corrections.some((x) => x.locationKey === c.locationKey && x.field === "dispute" && x.status === "pending")) return "Review the pending dispute before approving other knowledge.";
+  if (c.snapshot && c.snapshot !== knowledgeSnapshot(card)) return "Site knowledge changed after submission. Reject and request a new observation.";
+  return null;
 }
 
 export function decideCorrection(state: DemoState, id: string, approve: boolean, note?: string): DemoState {
   const c = state.corrections.find((x) => x.id === id);
-  if (!c || c.status !== "pending") return state;
-  const date = demoToday(state.shiftId);
-  const corrections = state.corrections.map((x) =>
-    x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedAt: new Date().toISOString(), decidedBy: "Dispatcher", note } : x,
-  );
-  const overlays = approve ? { ...state.overlays, [c.locationKey]: applyCorrection(state.overlays[c.locationKey], c, date, "Dispatcher") } : state.overlays;
-  const s = { ...state, corrections, overlays };
-  return log(s, {
-    type: approve ? "correction_approved" : "correction_rejected",
-    role: "dispatcher",
-    summary: `${approve ? "Approved" : "Rejected"} correction for ${cardsFor(state)[c.locationKey].name}`,
-    input: c.text,
-    output: approve ? "Card status → verified; the next plan uses this information" : note || "Card unchanged",
+  if (state.role !== "dispatcher" || !c || c.status !== "pending") return state;
+  if (approve && knowledgeReviewBlocker(state, c)) return state;
+  const at = new Date().toISOString();
+  const corrections = state.corrections.map((x) => x.id === id ? { ...x, status: approve ? "approved" as const : "rejected" as const, decidedAt: at, decidedBy: "Dispatcher", note } : x);
+  let overlay = state.overlays[c.locationKey];
+  if (approve) {
+    if (c.field === "dispute") overlay = { ...overlay, status: "disputed", disputeReason: c.text };
+    else if (c.field === "confirmation") overlay = { ...overlay, status: "verified", datasetRulesVerified: true, lastVerified: at, verifiedBy: "Dispatcher (demo review)", verificationRequested: false, disputeReason: undefined,
+      source: `Browser demo confirmation from ${c.proposedBy}, approved by Dispatcher; not a real field inspection` };
+    else overlay = applyCorrection(overlay, c, at, "Dispatcher (demo review)");
+  }
+  // Retire a migrated legacy flag on either decision; never recreate rejected requests.
+  if (c.field === "confirmation" && overlay?.verificationRequested) overlay = { ...overlay, verificationRequested: false };
+  const overlays = overlay === state.overlays[c.locationKey] ? state.overlays : { ...state.overlays, [c.locationKey]: overlay ?? {} };
+  const type = c.field === "confirmation" ? (approve ? "card_verified" : "verification_rejected") : c.field === "dispute" ? (approve ? "card_disputed" : "dispute_rejected") : (approve ? "correction_approved" : "correction_rejected");
+  return log({ ...state, corrections, overlays }, {
+    type, summary: `${approve ? "Approved" : "Rejected"} ${c.field} request for ${cardsFor(state)[c.locationKey]?.name ?? c.locationKey}`,
+    input: JSON.stringify({ request: c, decision: approve ? "approved" : "rejected", decidedAt: at, note }),
+    output: approve ? "Reviewed site knowledge updated for future plans only; dispatched routes, outcomes and buyer commitments preserved" : "Official knowledge unchanged",
   });
 }
 
+/** Rider confirmation is always a pending review, including for already verified cards. */
 export function verifyCard(state: DemoState, key: string): DemoState {
-  const name = cardsFor(state)[key].name;
-  if (state.role !== "dispatcher") {
-    const s = { ...state, overlays: { ...state.overlays, [key]: { ...state.overlays[key], verificationRequested: true } } };
-    return log(s, { type: "verification_requested", summary: `Rider confirmed details at ${name} — awaiting dispatcher`, output: "Status unchanged until dispatcher approves" });
-  }
-  const s = {
-    ...state,
-    overlays: {
-      ...state.overlays,
-      [key]: {
-        ...state.overlays[key],
-        status: "verified" as const,
-        lastVerified: demoToday(state.shiftId),
-        verifiedBy: "Dispatcher",
-        verificationRequested: false,
-        source: state.overlays[key]?.verificationRequested ? `Confirmed on site by ${riderLabel(state.shiftId)}, approved by dispatcher` : "Checked by dispatcher",
-        disputeReason: undefined,
-      },
-    },
-  };
-  return log(s, { type: "card_verified", role: "dispatcher", summary: `Verified stop card ${name}`, output: "Restrictions on this card become hard constraints in the next plan" });
+  return submitKnowledgeRequest(state, key, "confirmation", "Existing delivery-site instructions confirmed on site (demo report)");
 }
 
+/** Flag a report for review without weakening approved constraints or changing routes. */
 export function disputeCard(state: DemoState, key: string, reason: string): DemoState {
-  const s = { ...state, overlays: { ...state.overlays, [key]: { ...state.overlays[key], status: "disputed" as const, disputeReason: reason } } };
-  return log(s, { type: "card_disputed", summary: `Disputed stop card ${cardsFor(state)[key].name}`, input: reason, output: "Restrictions treated as soft until resolved" });
+  return submitKnowledgeRequest(state, key, "dispute", reason);
 }
 
 function addMessage(state: DemoState, stopId: string, from: BuyerMessage["from"], text: string): DemoState {

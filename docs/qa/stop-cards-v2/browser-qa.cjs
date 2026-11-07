@@ -1,0 +1,117 @@
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const base = process.env.SCOMPASS_QA_URL || 'http://localhost:3015';
+const shot = { animations: 'disabled', style: 'header{position:static!important} nextjs-portal{display:none!important}' };
+async function saved(p) { await p.waitForTimeout(450); return p.evaluate(() => JSON.parse(localStorage.getItem('s-compass-demo-v3'))); }
+async function close(p) { await p.getByRole('dialog').getByRole('button', {name:'Close',exact:true}).click(); await p.getByRole('dialog').waitFor({state:'hidden'}); }
+async function screenshot(p, name) { await p.evaluate(() => window.scrollTo(0,0)); await p.screenshot({...shot,path:path.join(__dirname, name),fullPage:true}); }
+async function run(browser, mode) {
+  const ctx = await browser.newContext({viewport:mode === 'mobile' ? {width:390,height:844} : {width:1440,height:1000}});
+  const p = await ctx.newPage(); p.setDefaultTimeout(12000); const errors=[]; p.on('pageerror',e=>errors.push(e.message)); const checks=[];
+  await p.goto(`${base}/stops`); await p.getByRole('heading',{name:'Site Knowledge',exact:true}).waitFor();
+  assert.equal(await p.locator('[data-site-card]').count(),11);
+  await p.getByText('Nothing to review.',{exact:false}).waitFor();
+  assert(!(await p.locator('[aria-label="Site cards"]').innerText()).includes('dataset visits'));
+  await screenshot(p,`overview-${mode}.png`); checks.push('11 compact sites / empty review queue / fixture status preserved');
+  for (const status of ['Disputed','Unverified','Suggested','Verified']) {
+    await p.getByRole('button',{name:new RegExp(`^${status} \\(`)}).click();
+    const selected = await p.locator('[data-site-card]').allTextContents();
+    assert(selected.every(text => text.includes(status)));
+  }
+  await p.getByRole('button',{name:'All (11)',exact:true}).click();
+  const site = p.locator('[data-site-card="loc-03"]'); const siteName=await site.locator('span.font-semibold').innerText();
+  await p.getByLabel('Search sites in this zone').fill(siteName.slice(0,10)); assert.equal(await p.locator('[data-site-card]').count(),1);
+  await p.getByLabel('Search sites in this zone').fill('no such site'); await p.getByText(/No sites match/).waitFor();
+  await p.getByLabel('Search sites in this zone').fill(''); await site.click();
+  let d=p.getByRole('dialog'); await d.waitFor(); assert.equal(await d.getByRole('button',{name:'Verify information',exact:true}).count(),0);
+  await d.getByText('Advanced Details',{exact:true}).click(); await d.getByRole('heading',{name:'Dataset overview'}).waitFor();
+  assert(await d.getByText(/dataset visits · first-attempt success/).isVisible());
+  await d.screenshot({path:path.join(__dirname,`advanced-${mode}.png`),animations:'disabled'}); await close(p);
+  checks.push('all filters / scoped search / advanced history / no direct verification bypass');
+  // Visual stress only: replace rendered text, never application state or source fixtures.
+  await site.locator('span.font-semibold').evaluate(el => {el.textContent='Very long delivery-site name for compact-card wrapping and mobile layout inspection';});
+  assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await screenshot(p,`long-name-${mode}.png`); await p.reload(); await p.getByRole('heading',{name:'Site Knowledge'}).waitFor();
+  await p.getByRole('link',{name:'Dispatcher',exact:true}).click(); await p.getByRole('button',{name:'Generate Proposed Plan'}).first().click();
+  assert.equal(await p.getByRole('button',{name:'Review Stop Card',exact:true}).count(),0);
+  await p.locator('[data-delivery-stop] button').first().click(); assert.equal(await p.getByRole('dialog').count(),0);
+  await p.getByRole('button',{name:'Dispatch to rider',exact:true}).click();
+  await p.getByRole('link',{name:'Buyer simulation',exact:true}).click();
+  await p.getByRole('button',{name:/Send confirmation request/}).first().click();
+  await p.getByRole('button',{name:/^Confirm /}).click();
+  await p.getByRole('link',{name:'Rider',exact:true}).click();
+  await p.getByRole('button',{name:/^Open stop card$/i}).first().click(); await d.waitFor();
+  let s=await saved(p); const opened=s.events.filter(e=>e.type==='stop_card_opened').at(-1); assert(opened);
+  // The active Rider card belongs to the next pending stop.
+  const next=s.currentPlan[s.shiftId].stops.find(x=>s.stopStates[s.shiftId][x.stopId].status==='pending'&&Number.isFinite(x.arriveMin));
+  const activeSite=await d.locator('p').allTextContents();
+  const baselinePlans=JSON.stringify(s.currentPlan); const baselineStops=JSON.stringify(s.stopStates);
+  assert.equal(await d.getByRole('button',{name:'Approve',exact:true}).count(),0);
+  await d.getByRole('button',{name:'Suggest Correction',exact:true}).click();
+  assert(await d.getByRole('button',{name:'Send correction for review'}).isDisabled());
+  await d.getByLabel('Correct information').fill('Observed demo side entrance'); await d.getByRole('button',{name:'Send correction for review'}).click();
+  await d.getByRole('button',{name:'Confirm on site',exact:true}).click();
+  assert(await d.getByRole('button',{name:'Confirm on site',exact:true}).isDisabled());
+  await d.getByRole('button',{name:'Report disputed information',exact:true}).first().click();
+  await d.getByLabel('Why is this card wrong?').fill('Demo report: instructions need confirmation');
+  await d.getByRole('button',{name:'Report disputed information',exact:true}).last().click();
+  await d.getByRole('alert').waitFor();
+  await d.screenshot({path:path.join(__dirname,`rider-reports-${mode}.png`),animations:'disabled'});
+  s=await saved(p); const [correction,confirmation,dispute]=s.corrections.slice(-3);
+  assert.equal(correction.status,'pending'); assert.equal(confirmation.field,'confirmation'); assert.equal(dispute.field,'dispute');
+  assert.notEqual(s.overlays[correction.locationKey]?.entrance,'Observed demo side entrance');
+  await close(p); await p.getByRole('link',{name:/^Stop cards/}).click();
+  await p.getByRole('heading',{name:'Knowledge review (3)',exact:true}).waitFor();
+  assert.equal(await p.getByRole('button',{name:'Approve',exact:true}).count(),0);
+  await screenshot(p,`rider-queue-${mode}.png`); checks.push('Rider correction/confirmation/dispute pending / official text unchanged / no Rider approval buttons');
+  await p.getByRole('combobox',{name:/Demo role switcher/}).selectOption('dispatcher');
+  const review=id=>p.locator(`[data-review-id="${id}"]`);
+  assert(await review(correction.id).getByRole('button',{name:'Approve',exact:true}).isDisabled());
+  await screenshot(p,`dispatcher-queue-${mode}.png`);
+  await review(dispute.id).getByRole('button',{name:'Reject',exact:true}).click();
+  await review(confirmation.id).getByRole('button',{name:'Approve',exact:true}).click();
+  await review(correction.id).getByText(/changed after submission/).waitFor();
+  assert(await review(correction.id).getByRole('button',{name:'Approve',exact:true}).isDisabled());
+  await review(correction.id).getByRole('button',{name:'Reject',exact:true}).click();
+  await p.getByRole('heading',{name:'Knowledge review (0)',exact:true}).waitFor();
+  // Resubmit against the reviewed version; a stale observation cannot overwrite it.
+  await p.getByRole('link',{name:'Rider',exact:true}).click(); await p.getByRole('button',{name:/^Open stop card$/i}).first().click();
+  await d.getByRole('button',{name:'Suggest Correction',exact:true}).click(); await d.getByLabel('Correct information').fill('Observed demo side entrance');
+  await d.getByRole('button',{name:'Send correction for review'}).click(); await close(p); s=await saved(p); const fresh=s.corrections.at(-1);
+  await p.getByRole('link',{name:/^Stop cards/}).click(); await p.getByRole('combobox',{name:/Demo role switcher/}).selectOption('dispatcher');
+  await review(fresh.id).getByRole('button',{name:'Approve',exact:true}).click();
+  await p.locator(`[data-site-card="${fresh.locationKey}"]`).click(); await d.getByText('Observed demo side entrance',{exact:true}).first().waitFor();
+  await d.screenshot({path:path.join(__dirname,`approved-card-${mode}.png`),animations:'disabled'}); await close(p);
+  s=await saved(p); assert.equal(JSON.stringify(s.currentPlan),baselinePlans); assert.equal(JSON.stringify(s.stopStates),baselineStops);
+  assert(s.events.some(e=>e.type==='card_verified')); assert(s.events.some(e=>e.type==='correction_approved')); assert(s.events.some(e=>e.type==='dispute_rejected'));
+  await p.reload(); await p.getByRole('heading',{name:'Site Knowledge'}).waitFor();
+  assert((await p.locator(`[data-site-card="${fresh.locationKey}"]`).innerText()).includes('Observed demo side entrance'));
+  checks.push('Dispatcher reject / approve confirmation / stale conflict blocked / resubmitted correction approved / routes and buyer commitments unchanged / reload');
+  await p.getByRole('link',{name:'Rider',exact:true}).click(); await p.getByRole('button',{name:/^Open stop card$/i}).first().click();
+  await d.getByRole('button',{name:'Report disputed information',exact:true}).first().click();
+  await d.getByLabel('Why is this card wrong?').fill('Demo accepted dispute requiring another observation');
+  await d.getByRole('button',{name:'Report disputed information',exact:true}).last().click(); await close(p);
+  s=await saved(p); const acceptedDispute=s.corrections.at(-1);
+  await p.getByRole('link',{name:/^Stop cards/}).click(); await p.getByRole('combobox',{name:/Demo role switcher/}).selectOption('dispatcher');
+  await review(acceptedDispute.id).getByRole('button',{name:'Accept dispute',exact:true}).click();
+  assert((await p.locator(`[data-site-card="${fresh.locationKey}"]`).innerText()).includes('Disputed'));
+  s=await saved(p); assert.equal(JSON.stringify(s.currentPlan),baselinePlans); assert.equal(JSON.stringify(s.stopStates),baselineStops);
+  await p.getByRole('link',{name:'Rider',exact:true}).click(); await p.getByRole('button',{name:/^Open stop card$/i}).first().click();
+  await d.getByRole('button',{name:'Confirm on site',exact:true}).click(); await close(p); s=await saved(p); const resolve=s.corrections.at(-1);
+  await p.getByRole('link',{name:/^Stop cards/}).click(); await p.getByRole('combobox',{name:/Demo role switcher/}).selectOption('dispatcher');
+  await review(resolve.id).getByRole('button',{name:'Approve',exact:true}).click();
+  checks.push('accepted dispute visible / active plan preserved / new observation resolves dispute through review');
+  await p.getByRole('link',{name:'Rider',exact:true}).click(); await p.getByRole('button',{name:'Report issue',exact:true}).first().click();
+  await d.waitFor(); await d.getByLabel('What happened?').selectOption('other'); await d.getByLabel('Describe it').fill('Demo operational issue, separate from site knowledge');
+  await d.getByRole('button',{name:'Send report',exact:true}).click(); await d.waitFor({state:'hidden'});
+  await p.getByRole('button',{name:'Record outcome',exact:true}).first().click(); await p.getByRole('button',{name:'Save outcome',exact:true}).click();
+  await p.getByRole('link',{name:'Evidence',exact:true}).click(); const wait=p.waitForEvent('download'); await p.getByRole('button',{name:'Export CSV',exact:true}).click();
+  const dl=await wait; const csv=await dl.createReadStream(); let data='';for await(const chunk of csv)data+=chunk;
+  for(const kind of ['verification_requested','card_verified','correction_approved','dispute_reported','card_disputed','issue_reported','outcome_recorded'])assert(data.includes(kind));
+  assert.equal(await p.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false); assert.deepEqual(errors,[]);
+  checks.push('Rider Report issue / Record outcome / Evidence export / no page errors or horizontal overflow');
+  await ctx.close(); return checks;
+}
+(async()=>{const b=await chromium.launch({headless:true,executablePath:'/usr/bin/chromium',args:['--no-sandbox']});try{const results={};for(const mode of ['desktop','mobile']){results[mode]=await run(b,mode);console.log(mode,results[mode]);}fs.writeFileSync(path.join(__dirname,'browser-results.json'),JSON.stringify(results,null,2));}finally{await b.close();}})().catch(e=>{console.error(e);process.exitCode=1;});

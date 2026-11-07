@@ -1,0 +1,18 @@
+{
+  "desktop": [
+    "11 compact sites / empty review queue / fixture status preserved",
+    "all filters / scoped search / advanced history / no direct verification bypass",
+    "Rider correction/confirmation/dispute pending / official text unchanged / no Rider approval buttons",
+    "Dispatcher reject / approve confirmation / stale conflict blocked / resubmitted correction approved / routes and buyer commitments unchanged / reload",
+    "accepted dispute visible / active plan preserved / new observation resolves dispute through review",
+    "Rider Report issue / Record outcome / Evidence export / no page errors or horizontal overflow"
+  ],
+  "mobile": [
+    "11 compact sites / empty review queue / fixture status preserved",
+    "all filters / scoped search / advanced history / no direct verification bypass",
+    "Rider correction/confirmation/dispute pending / official text unchanged / no Rider approval buttons",
+    "Dispatcher reject / approve confirmation / stale conflict blocked / resubmitted correction approved / routes and buyer commitments unchanged / reload",
+    "accepted dispute visible / active plan preserved / new observation resolves dispute through review",
+    "Rider Report issue / Record outcome / Evidence export / no page errors or horizontal overflow"
+  ]
+}
