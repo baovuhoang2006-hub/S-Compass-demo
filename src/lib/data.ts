@@ -66,3 +66,57 @@ export function shiftById(id: string): Shift {
   if (!s) throw new Error(`Unknown shift ${id}`);
   return s;
 }
+
+// ------------------------------------------------------------------ imported data (Data intake)
+// One imported batch can be active at a time. Its riders, shifts and places are added to the same
+// lists the demo uses, so the planner, stop cards and replanning work on them unchanged.
+import type { ImportBatch } from "./intake";
+
+const IMPORT_KEY = "s-compass-import-v1";
+let activeImport: ImportBatch | null = null;
+
+export function activeImportBatch(): ImportBatch | null {
+  return activeImport;
+}
+
+export function setImported(batch: ImportBatch | null) {
+  const keep = <T,>(arr: T[], isImported: (x: T) => boolean) => {
+    for (let i = arr.length - 1; i >= 0; i--) if (isImported(arr[i])) arr.splice(i, 1);
+  };
+  keep(fixtures.riders, (r) => r.id.startsWith("imp-"));
+  keep(fixtures.shifts, (s) => s.id.startsWith("imp-"));
+  keep(fixtures.knowledge, (k) => k.key.startsWith("imp-"));
+  for (const key of Object.keys(knowledgeByKey)) if (key.startsWith("imp-")) delete knowledgeByKey[key];
+  activeImport = batch;
+  if (!batch) return;
+  fixtures.riders.push(...batch.riders);
+  fixtures.shifts.push(...batch.shifts);
+  fixtures.knowledge.push(...batch.knowledge);
+  for (const k of batch.knowledge) knowledgeByKey[k.key] = k;
+}
+
+export function isImportedShift(id: string) {
+  return id.startsWith("imp-");
+}
+
+/** Imported data is kept in this browser only (never sent to the shared database). */
+export function saveImportedLocal(batch: ImportBatch | null): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    if (batch) window.localStorage.setItem(IMPORT_KEY, JSON.stringify(batch));
+    else window.localStorage.removeItem(IMPORT_KEY);
+    return null;
+  } catch {
+    return "The file is too large to keep after a page reload in this browser. It works until you reload.";
+  }
+}
+
+export function loadImportedLocal(): ImportBatch | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(IMPORT_KEY);
+    return raw ? (JSON.parse(raw) as ImportBatch) : null;
+  } catch {
+    return null;
+  }
+}

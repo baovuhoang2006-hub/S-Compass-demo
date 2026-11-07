@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { shiftById } from "@/lib/data";
-import { cardsFor, initialState, log, type DemoState } from "@/lib/demoState";
+import { fixtures, loadImportedLocal, saveImportedLocal, setImported, shiftById } from "@/lib/data";
+import { cardsFor, ensureShiftState, initialState, log, type DemoState } from "@/lib/demoState";
 import { getAdapter, type PersistenceAdapter, type SaveResult } from "@/lib/persistence";
 import type { Plan, Shift, StopCard } from "@/lib/types";
 
@@ -32,7 +32,13 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
     adapter
       .load()
       .then((s) => {
-        if (alive) setState(s ?? initialState());
+        if (!alive) return;
+        // Imported rider-days live in this browser only; register them before any shift is looked up.
+        const imported = loadImportedLocal();
+        if (imported) setImported(imported);
+        let next = s ?? initialState();
+        if (!fixtures.shifts.some((x) => x.id === next.shiftId)) next = { ...next, shiftId: fixtures.shifts[0].id };
+        setState(ensureShiftState(next, next.shiftId));
       })
       .catch((e: Error) => {
         if (!alive) return;
@@ -59,6 +65,8 @@ export function DemoProvider({ children }: { children: React.ReactNode }) {
 
   const reset = React.useCallback(() => {
     dirty.current = true;
+    setImported(null);
+    saveImportedLocal(null);
     adapter.clear().finally(() => {
       setState(log(initialState(), { type: "demo_reset", summary: "Demo reset to the original fixtures" }));
     });

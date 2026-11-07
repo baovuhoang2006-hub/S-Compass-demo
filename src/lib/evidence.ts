@@ -38,6 +38,8 @@ export const EVENT_TYPES: Record<string, string> = {
   parcel_transferred: "Parcel transferred",
   test_session_started: "Test session started",
   tester_note: "Tester note",
+  data_imported: "Data imported",
+  data_import_removed: "Imported data removed",
   demo_reset: "Demo reset",
   shift_selected: "Shift selected",
 };

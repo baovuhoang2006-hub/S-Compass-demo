@@ -165,8 +165,23 @@ export function selectRider(state: DemoState, riderId: string): DemoState {
   return selectShift(state, riderById(riderId).shiftIds[0]);
 }
 
+/** Adds empty per-shift state for shifts that were added after the session started (imported rider-days). */
+export function ensureShiftState(state: DemoState, shiftId: string): DemoState {
+  if (state.stopStates[shiftId] && shiftId in state.currentPlan && shiftId in state.clockMin) return state;
+  const shift = shiftById(shiftId);
+  return {
+    ...state,
+    stopStates: {
+      ...state.stopStates,
+      [shiftId]: state.stopStates[shiftId] ?? Object.fromEntries(shift.stops.map((x) => [x.id, { status: "pending", buyer: { kind: "none" } } as StopState])),
+    },
+    currentPlan: { ...state.currentPlan, [shiftId]: state.currentPlan[shiftId] ?? null },
+    clockMin: { ...state.clockMin, [shiftId]: state.clockMin[shiftId] ?? SHIFT_START },
+  };
+}
+
 export function selectShift(state: DemoState, shiftId: string): DemoState {
-  const s = { ...state, shiftId, draftPlan: null, comparison: null };
+  const s = { ...ensureShiftState(state, shiftId), shiftId, draftPlan: null, comparison: null };
   return log(s, { type: "shift_selected", summary: `Selected ${riderLabel(shiftId)}, ${shiftById(shiftId).weekday} ${shiftById(shiftId).date} shift` });
 }
 
@@ -474,4 +489,14 @@ export function confirmEligibility(stopId: string, state: DemoState): string[] {
   if (ps?.p != null && ps.p < 0.7) why.push(`Planned block success estimate ${(ps.p * 100).toFixed(0)}% (< 70%)`);
   if (shift.isWeekend && (stop.locationType === "office" || stop.locationType === "school")) why.push("Office/school at the weekend");
   return why;
+}
+
+// ------------------------------------------------------------------ Data intake
+export function recordImport(state: DemoState, summary: string, details: string): DemoState {
+  return log(state, { type: "data_imported", role: "dispatcher", summary, input: details });
+}
+
+export function recordImportRemoved(state: DemoState): DemoState {
+  const back = state.shiftId.startsWith("imp-") ? { ...state, shiftId: fixtures.shifts[0].id, draftPlan: null, comparison: null } : state;
+  return log(back, { type: "data_import_removed", role: "dispatcher", summary: "Imported data removed; demo fixtures kept" });
 }

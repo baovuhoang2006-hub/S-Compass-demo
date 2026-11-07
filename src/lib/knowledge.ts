@@ -100,7 +100,7 @@ export function buildCard(
   const status: CardStatus = o.status ?? defaultStatus(rec);
   const verified = status === "verified";
 
-  const datasetSource = `Dataset notes from ${rec.visits} visits (1–30 Sep 2026)`;
+  const datasetSource = rec.key.startsWith("imp-") ? rec.evidence : `Dataset notes from ${rec.visits} visits (1–30 Sep 2026)`;
   const restrictions: ActiveRestriction[] = [];
   const seen = new Set<string>();
   for (const r of rec.windowRestrictions) {
@@ -140,6 +140,8 @@ export function buildCard(
 
   let entranceSource: string;
   if (verified) entranceSource = `Verified by ${o.verifiedBy ?? "hub"} on ${o.lastVerified ?? "—"}`;
+  else if (rec.entranceCandidate && rec.key.startsWith("imp-"))
+    entranceSource = `Suggested drop-off point: centre of the imported pins for this place (spread about ${rec.pinSpreadMeters ?? "?"} m). Not verified yet.`;
   else if (rec.entranceCandidate)
     entranceSource = `Suggested drop-off point: centre of successful dataset pins. Pins for this site spread about ${rec.pinSpreadMeters ?? "?"} m, so a pin is not a verified entrance.`;
   else entranceSource = "No usable pin in the dataset";

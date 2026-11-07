@@ -101,7 +101,7 @@ export default function DispatcherPage() {
                 );
               })}
             </select>
-            <div className="mt-1 text-xs text-ink-faint">A real rider-day from the dataset, de-identified</div>
+            <div className="mt-1 text-xs text-ink-faint">{shift.id.startsWith("imp-") ? "A rider-day from the imported file (see Data intake)" : "A real rider-day from the dataset, de-identified"}</div>
           </div>
           <div className="text-sm" role="group" aria-label="Planning method">
             <div className="text-xs text-ink-faint">Planning method</div>
@@ -162,7 +162,11 @@ export default function DispatcherPage() {
               value={`${pct(historical.byWindow.find((w) => w.attempt_time === "evening")!.success)} vs ${pct(historical.byWindow.find((w) => w.attempt_time === "morning")!.success)}`}
               sub="first attempts"
             />
-            <Stat label="This rider-day in the dataset" value={`${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}`} sub="attempts delivered (actual)" />
+            {shift.id.startsWith("imp-") ? (
+              <Stat label="This rider-day in the file" value={shift.actualDatasetOutcome.attempts ? `${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}` : "—"} sub={shift.actualDatasetOutcome.attempts ? "attempts delivered (from the file)" : "no outcomes in the file"} />
+            ) : (
+              <Stat label="This rider-day in the dataset" value={`${shift.actualDatasetOutcome.delivered} / ${shift.actualDatasetOutcome.attempts}`} sub="attempts delivered (actual)" />
+            )}
           </div>
         </Panel>
         <Panel>
