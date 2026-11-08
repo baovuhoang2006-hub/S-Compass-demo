@@ -1,0 +1,26 @@
+{
+  "desktop": {
+    "emptyState": true,
+    "codAndDisclosure": true,
+    "longNamesAndReload": true,
+    "stopCardCorrectionAndKeyboard": true,
+    "disputeWarningVisible": true,
+    "issueTypesAndReplanNotification": true,
+    "unscheduledStopsVisible": true,
+    "outcomesCompletedClockAndSelection": true,
+    "evidenceNoErrorsOrOverflow": true
+  },
+  "mobile": {
+    "emptyState": true,
+    "codAndDisclosure": true,
+    "longNamesAndReload": true,
+    "stopCardCorrectionAndKeyboard": true,
+    "disputeWarningVisible": true,
+    "issueTypesAndReplanNotification": true,
+    "unscheduledStopsVisible": true,
+    "outcomesCompletedClockAndSelection": true,
+    "evidenceNoErrorsOrOverflow": true
+  },
+  "prepaid": true,
+  "buyerConfirmedDisplay": true
+}

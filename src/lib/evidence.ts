@@ -15,6 +15,8 @@ export interface EvidenceEvent {
 }
 
 export const EVENT_TYPES: Record<string, string> = {
+  data_imported: "Data imported",
+  data_import_removed: "Imported data removed",
   plan_generated: "Plan generated",
   plans_compared: "Plans compared",
   plan_dispatched: "Plan dispatched to rider",
@@ -24,6 +26,9 @@ export const EVENT_TYPES: Record<string, string> = {
   correction_rejected: "Correction rejected",
   card_verified: "Card verified",
   card_disputed: "Card disputed",
+  dispute_reported: "Dispute report submitted",
+  dispute_rejected: "Dispute report rejected",
+  verification_rejected: "On-site confirmation rejected",
   verification_requested: "Verification requested",
   buyer_invited: "Buyer invited",
   buyer_confirmed: "Buyer confirmed window",
@@ -31,6 +36,8 @@ export const EVENT_TYPES: Record<string, string> = {
   buyer_pickup: "Buyer chose pickup",
   buyer_no_response: "Buyer did not respond",
   issue_reported: "Issue reported",
+  demo_scenario_triggered: "Simulated event initiated by demo operator",
+  replan_superseded: "Pending proposal superseded",
   replan_proposed: "Replan proposed",
   replan_accepted: "Replan accepted",
   replan_overridden: "Replan overridden",

@@ -1,132 +1,67 @@
 "use client";
 
-import { Check, X } from "lucide-react";
 import * as React from "react";
 import { CardStatusBadge, TYPE_LABEL } from "@/components/bits";
+import { KnowledgeReviewQueue } from "@/components/KnowledgeReviewQueue";
 import { StopCardDialog } from "@/components/StopCardDialog";
-import { Button } from "@/components/ui/button";
-import { Panel, PanelHeader } from "@/components/ui/panel";
+import { Input, Label } from "@/components/ui/field";
 import { knowledgeForRider, riderOfShift } from "@/lib/data";
-import { decideCorrection } from "@/lib/demoState";
 import type { CardStatus } from "@/lib/types";
-import { cn, pct } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
 const ORDER: CardStatus[] = ["disputed", "unverified", "suggested", "verified"];
 
 export default function StopsPage() {
-  const { state, update, cards, shift } = useDemo();
+  const { state, cards, shift } = useDemo();
   const [open, setOpen] = React.useState<string | null>(null);
   const [filter, setFilter] = React.useState<CardStatus | "all">("all");
-  const pending = state.corrections.filter((c) => c.status === "pending" && cards[c.locationKey] && knowledgeForRider(riderOfShift(shift).id).some((k) => k.key === c.locationKey));
-  const decided = state.corrections.filter((c) => c.status !== "pending").slice().reverse();
+  const [search, setSearch] = React.useState("");
   const rider = riderOfShift(shift);
-  const zoneKnowledge = knowledgeForRider(rider.id);
-  const zoneCards = zoneKnowledge.map((k) => cards[k.key]);
-  const list = zoneCards
-    .filter((c) => filter === "all" || c.status === filter)
+  const zoneCards = knowledgeForRider(rider.id).map((k) => cards[k.key]);
+  const list = zoneCards.filter((c) => (filter === "all" || c.status === filter) && c.name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
     .sort((a, b) => ORDER.indexOf(a.status) - ORDER.indexOf(b.status));
-  const counts = Object.fromEntries(ORDER.map((s) => [s, zoneCards.filter((c) => c.status === s).length]));
-  const ordersToday = (key: string) => shift.stops.filter((s) => s.locationKey === key).length;
-  const isDispatcher = state.role === "dispatcher";
+  React.useEffect(() => { setOpen(null); setSearch(""); setFilter("all"); }, [rider.id]);
 
-  return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
-      <div className="space-y-4">
-        <div>
-          <h1 className="text-xl font-semibold">Stop Knowledge Map · {rider.zoneLabel}</h1>
-          <p className="max-w-3xl text-sm text-ink-soft">
-            One card per delivery site in the zone of {rider.label} ({zoneCards.length} sites). Change the rider on the Dispatcher screen to see another zone. Cards start from dataset notes (suggested) and only become verified after a rider confirms on site and a
-            dispatcher approves. A dataset coordinate is never treated as a verified entrance.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filter by status">
-          {(["all", ...ORDER] as const).map((f) => (
-            <button
-              key={f}
-              role="tab"
-              aria-selected={filter === f}
-              onClick={() => setFilter(f)}
-              className={cn("rounded-md border px-3 py-1 text-sm", filter === f ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink-soft")}
-            >
-              {f === "all" ? `All (${zoneCards.length})` : `${f[0].toUpperCase()}${f.slice(1)} (${counts[f]})`}
-            </button>
-          ))}
-        </div>
-        <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {list.map((c) => (
-            <li key={c.key}>
-              <button onClick={() => setOpen(c.key)} className="h-full w-full rounded-xl border border-line bg-surface p-4 text-left hover:border-ink-faint">
-                <div className="flex items-start justify-between gap-2">
-                  <span className="font-semibold leading-5">{c.name}</span>
-                  <CardStatusBadge status={c.status} />
-                </div>
-                <p className="mt-0.5 text-xs text-ink-faint">
-                  {TYPE_LABEL[c.type]} · {c.visits} dataset visits · {ordersToday(c.key)} {ordersToday(c.key) === 1 ? "order" : "orders"} in this shift
-                </p>
-                <p className="mt-2 text-sm">{c.entrance}</p>
-                <p className="text-sm text-ink-soft">{c.handover}</p>
-                {c.restrictions.length ? (
-                  <p className="mt-1 text-xs text-warn">{c.restrictions.map((r) => r.text).join("; ")}</p>
-                ) : null}
-                <p className="mt-2 text-xs text-ink-faint">
-                  Pin spread {c.pinSpreadMeters ?? "—"} m · first-attempt success {pct(zoneKnowledge.find((k) => k.key === c.key)!.firstAttemptSuccess)} · last verified {c.lastVerified ?? "never"}
-                </p>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <div className="space-y-4">
-        <Panel>
-          <PanelHeader title="Corrections to review" note={isDispatcher ? "Approving makes the card verified and the next plan uses it" : "Switch demo role to Dispatcher to approve"} />
-          {pending.length ? (
-            <ul className="divide-y divide-line">
-              {pending.map((c) => (
-                <li key={c.id} className="space-y-2 px-4 py-3 text-sm">
-                  <p>
-                    <span className="font-medium">{cards[c.locationKey].name}</span> — {c.field.replace("_", " ")}
-                  </p>
-                  <p className="rounded-md bg-canvas px-2 py-1">{c.text}</p>
-                  <p className="text-xs text-ink-faint">
-                    From {c.proposedBy} at {new Date(c.createdAt).toLocaleTimeString()}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="ok" disabled={!isDispatcher} onClick={() => update((s) => decideCorrection(s, c.id, true))}>
-                      <Check /> Approve
-                    </Button>
-                    <Button size="sm" variant="danger" disabled={!isDispatcher} onClick={() => update((s) => decideCorrection(s, c.id, false, "Rejected in review queue"))}>
-                      <X /> Reject
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setOpen(c.locationKey)}>
-                      Open card
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="px-4 py-6 text-sm text-ink-faint">Nothing to review. Riders send corrections from a stop card with Suggest correction.</p>
-          )}
-        </Panel>
-        {decided.length ? (
-          <Panel>
-            <PanelHeader title="Decided" />
-            <ul className="divide-y divide-line text-sm">
-              {decided.map((c) => (
-                <li key={c.id} className="flex justify-between gap-2 px-4 py-2">
-                  <span>
-                    {cards[c.locationKey].name}: {c.text}
-                  </span>
-                  <span className={c.status === "approved" ? "text-ok" : "text-bad"}>{c.status}</span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
-        ) : null}
-      </div>
-      <StopCardDialog cardKey={open} open={!!open} onOpenChange={(o) => !o && setOpen(null)} from="stop knowledge map" />
+  return <div className="space-y-4">
+    <div>
+      <h1 className="text-xl font-semibold">Site Knowledge</h1>
+      <p className="text-sm text-ink-soft">Review delivery-site knowledge, verify rider feedback, and manage instructions for future plans.</p>
+      <p className="mt-1 text-sm font-medium">{rider.label} · {rider.zoneLabel} · {zoneCards.length} sites · {shift.weekday} {shift.date}</p>
+      <details className="mt-3 rounded-lg border border-line bg-surface p-3 text-sm"><summary className="cursor-pointer font-medium">How verification works</summary><div className="mt-2 space-y-2 text-ink-soft">
+        <p>Rider → pending report → Dispatcher review → site knowledge for future plans. Change the rider on Dispatcher to select another zone.</p>
+        <p>Dataset notes start as Suggested or Unverified. A dataset pin is not a verified entrance. Seeded Verified cards are labelled demo fixtures, not real field inspections.</p>
+        <p>Unreviewed reports never replace official instructions or create hard rules. Pending disputes require dispatcher advice. An accepted dispute flags the card for resolution; use a new observation to verify it again.</p>
+        <p>Approved updates do not change dispatched routes, completed stops or buyer-confirmed windows. Generate and review a new plan explicitly. Demo role selection is not production authentication; reports stay in this browser. No automatic model retraining.</p>
+      </div></details>
     </div>
-  );
+    <a href="#knowledge-review" className="inline-block text-sm font-medium text-info underline">Review requests ({state.corrections.filter((c) => c.status === "pending" && zoneCards.some((site) => site.key === c.locationKey)).length})</a>
+    <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+      <div className="min-w-0 space-y-4">
+        <div className="max-w-md"><Label htmlFor="site-search">Search sites in this zone</Label><Input id="site-search" type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Site name" /></div>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by status">
+          {(["all", ...ORDER] as const).map((f) => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)} className={cn("rounded-md border px-3 py-1 text-sm", filter === f ? "border-ink bg-ink text-white" : "border-line bg-surface text-ink-soft")}>
+            {f === "all" ? `All (${zoneCards.length})` : `${f[0].toUpperCase()}${f.slice(1)} (${zoneCards.filter((c) => c.status === f).length})`}
+          </button>)}
+        </div>
+        <ul aria-label="Site cards" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{list.map((c) => {
+          const orders = shift.stops.filter((s) => s.locationKey === c.key).length;
+          const dispute = state.corrections.some((r) => r.locationKey === c.key && r.field === "dispute" && r.status === "pending");
+          // Safety first: live closure, then hard rule, then access instruction, then a soft rule.
+          const restriction = c.temporaryClosure?.text ?? c.restrictions.find((r) => r.strength === "hard")?.text ?? c.access[0] ?? c.restrictions[0]?.text;
+          return <li key={c.key}><button data-site-card={c.key} onClick={() => setOpen(c.key)} className="h-full w-full min-w-0 space-y-2 rounded-xl border border-line bg-surface p-4 text-left hover:border-ink-faint focus-visible:outline-2 focus-visible:outline-info">
+            <div className="flex flex-wrap items-start justify-between gap-2"><span className="min-w-0 break-words font-semibold leading-5">{c.name}</span><CardStatusBadge status={c.status} /></div>
+            <p className="text-xs text-ink-soft">{TYPE_LABEL[c.type]} · {orders} {orders === 1 ? "order" : "orders"} this shift</p>
+            <p className="line-clamp-2 break-words text-sm"><span className="text-ink-faint">Entrance: </span>{c.entrance}</p>
+            <p className="line-clamp-2 break-words text-sm"><span className="text-ink-faint">Handover: </span>{c.handover}</p>
+            {restriction ? <p className="line-clamp-2 break-words text-xs text-warn">{restriction}</p> : null}
+            {dispute ? <p className="text-xs font-medium text-bad">Dispute awaiting review · consult Dispatcher</p> : null}
+          </button></li>;
+        })}</ul>
+        {!list.length ? <p role="status" className="rounded-lg border border-line p-5 text-sm text-ink-soft">No sites match this search and filter in the selected zone.</p> : null}
+      </div>
+      <aside id="knowledge-review" className="min-w-0 scroll-mt-40"><KnowledgeReviewQueue siteKeys={zoneCards.map((c) => c.key)} onOpen={setOpen} /></aside>
+    </div>
+    <StopCardDialog cardKey={open} open={!!open} onOpenChange={(o) => !o && setOpen(null)} from="site knowledge" />
+  </div>;
 }

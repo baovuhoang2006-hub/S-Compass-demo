@@ -1,0 +1,200 @@
+{
+  "desktop": {
+    "A": [
+      {
+        "status": "safe",
+        "capacity": "Pass",
+        "time": "Pass",
+        "incident": "RISK-OVERLOAD-b46f20ea"
+      },
+      {
+        "status": "review",
+        "capacity": "Failed",
+        "time": "Pass",
+        "incident": "RISK-OVERLOAD-6a666dbd"
+      },
+      {
+        "status": "timeout",
+        "capacity": "Failed",
+        "time": "Failed",
+        "incident": "RISK-OVERLOAD-160e57cb"
+      }
+    ],
+    "B": [
+      {
+        "fault": "none",
+        "status": "safe",
+        "numeric": "Pass",
+        "rules": "Pass",
+        "incident": "RISK-AI-aebbf84a"
+      },
+      {
+        "fault": "nan",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-1357fb29"
+      },
+      {
+        "fault": "infinity",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-28babb0c"
+      },
+      {
+        "fault": "above_one",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-08099c5a"
+      },
+      {
+        "fault": "missing_feature",
+        "status": "review",
+        "numeric": "Not evaluated",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-6d6f3735"
+      },
+      {
+        "fault": "hard_conflict",
+        "status": "review",
+        "numeric": "Pass",
+        "rules": "Failed",
+        "incident": "RISK-AI-85a01178"
+      }
+    ],
+    "C": [
+      {
+        "fault": "missing_pin",
+        "status": "review",
+        "incident": "RISK-DATA-e647d7f6"
+      },
+      {
+        "fault": "duplicate_id",
+        "status": "review",
+        "incident": "RISK-DATA-09bab9d5"
+      },
+      {
+        "fault": "negative_service",
+        "status": "review",
+        "incident": "RISK-DATA-93033dc9"
+      },
+      {
+        "fault": "invalid_window",
+        "status": "review",
+        "incident": "RISK-DATA-6e69a892"
+      },
+      {
+        "fault": "conflicting_card",
+        "status": "review",
+        "incident": "RISK-DATA-7d94f5ab"
+      }
+    ],
+    "protectedState": true,
+    "verifiedEntranceFallback": true,
+    "inputEditsAndCancellation": true,
+    "evidence": true,
+    "rulesDraftOnly": true,
+    "errors": []
+  },
+  "mobile": {
+    "A": [
+      {
+        "status": "safe",
+        "capacity": "Pass",
+        "time": "Pass",
+        "incident": "RISK-OVERLOAD-b46f20ea"
+      },
+      {
+        "status": "review",
+        "capacity": "Failed",
+        "time": "Pass",
+        "incident": "RISK-OVERLOAD-6a666dbd"
+      },
+      {
+        "status": "timeout",
+        "capacity": "Failed",
+        "time": "Failed",
+        "incident": "RISK-OVERLOAD-160e57cb"
+      }
+    ],
+    "B": [
+      {
+        "fault": "none",
+        "status": "safe",
+        "numeric": "Pass",
+        "rules": "Pass",
+        "incident": "RISK-AI-aebbf84a"
+      },
+      {
+        "fault": "nan",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-1357fb29"
+      },
+      {
+        "fault": "infinity",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-28babb0c"
+      },
+      {
+        "fault": "above_one",
+        "status": "review",
+        "numeric": "Failed",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-08099c5a"
+      },
+      {
+        "fault": "missing_feature",
+        "status": "review",
+        "numeric": "Not evaluated",
+        "rules": "Not evaluated",
+        "incident": "RISK-AI-6d6f3735"
+      },
+      {
+        "fault": "hard_conflict",
+        "status": "review",
+        "numeric": "Pass",
+        "rules": "Failed",
+        "incident": "RISK-AI-85a01178"
+      }
+    ],
+    "C": [
+      {
+        "fault": "missing_pin",
+        "status": "review",
+        "incident": "RISK-DATA-e647d7f6"
+      },
+      {
+        "fault": "duplicate_id",
+        "status": "review",
+        "incident": "RISK-DATA-09bab9d5"
+      },
+      {
+        "fault": "negative_service",
+        "status": "review",
+        "incident": "RISK-DATA-93033dc9"
+      },
+      {
+        "fault": "invalid_window",
+        "status": "review",
+        "incident": "RISK-DATA-6e69a892"
+      },
+      {
+        "fault": "conflicting_card",
+        "status": "review",
+        "incident": "RISK-DATA-7d94f5ab"
+      }
+    ],
+    "protectedState": true,
+    "verifiedEntranceFallback": true,
+    "inputEditsAndCancellation": true,
+    "evidence": true,
+    "rulesDraftOnly": true,
+    "errors": []
+  }
+}

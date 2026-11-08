@@ -73,3 +73,23 @@ export function predictFromVector(v: number[]): number {
 export function predict(x: ModelInput): number {
   return predictFromVector(featureVector(x));
 }
+
+export type ModelFault = "none" | "nan" | "infinity" | "above_one" | "missing_feature";
+
+/** Faults are accepted only by the Risk Challenge caller; normal planning passes no fault. */
+export function checkedPredict(x: ModelInput, fault: ModelFault = "none"): { p: number | null; reason: string | null } {
+  if (fault === "missing_feature") x = { ...x, locHistory: undefined as unknown as ModelInput["locHistory"] };
+  if (!LOC_TYPES.includes(x.locType) || !WINDOWS.includes(x.block) || !PARCELS.includes(x.parcel) ||
+      !["cod", "prepaid"].includes(x.payment) ||
+      typeof x.weekend !== "boolean" || typeof x.hasPin !== "boolean" || typeof x.isReattempt !== "boolean" ||
+      (x.serviceMin !== null && (!Number.isFinite(x.serviceMin) || x.serviceMin < 0)) ||
+      !x.locHistory || !x.locBlockHistory ||
+      ![x.locHistory.attempts, x.locHistory.delivered, x.locBlockHistory.attempts, x.locBlockHistory.delivered].every(Number.isFinite)) {
+    return { p: null, reason: "Missing or invalid required model feature" };
+  }
+  const vector = featureVector(x);
+  if (!vector.every(Number.isFinite)) return { p: null, reason: "Non-finite model feature" };
+  const p = fault === "nan" ? NaN : fault === "infinity" ? Infinity : fault === "above_one" ? 1.25 : predictFromVector(vector);
+  if (!Number.isFinite(p) || p < 0 || p > 1) return { p: null, reason: "Prediction is not a finite probability in [0, 1]" };
+  return { p, reason: null };
+}

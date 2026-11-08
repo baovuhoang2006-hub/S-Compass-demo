@@ -20,6 +20,8 @@ import {
   verifyCard,
   planFor,
   cardsFor,
+  comparePlans,
+  comparisonRunIdFor,
 } from "../demoState";
 import { toCsv } from "../evidence";
 import { tableP } from "../successTable";
@@ -132,8 +134,8 @@ describe("planner", () => {
 
   it("verified weekend closure on Saturday flags office stops instead of dropping them", () => {
     let s = selectShift(initialState(), "shift-sat");
-    s = { ...s, role: "dispatcher" };
-    s = verifyCard(s, "loc-01");
+    s = verifyCard({ ...s, role: "rider" }, "loc-01");
+    s = decideCorrection({ ...s, role: "dispatcher" }, s.corrections[0].id, true);
     const plan = planFor(s, "rules");
     const officeStops = shiftById("shift-sat").stops.filter((x) => x.locationKey === "loc-01");
     for (const o of officeStops) {
@@ -152,6 +154,64 @@ describe("planner", () => {
     expect(s.currentPlan[s.shiftId]!.stops.some((x) => x.stopId === id)).toBe(false);
     expect(planFor(s, "rules").stops.some((x) => x.stopId === id)).toBe(false);
     expect(s.transfers.length).toBe(1);
+  });
+});
+
+describe("KPI comparison provenance", () => {
+  it("uses a repeatable common scenario and common eligible stop denominator", () => {
+    const first = comparePlans(initialState());
+    const second = comparePlans(initialState());
+    expect(first.comparisonMeta?.scenarioId).toBe(second.comparisonMeta?.scenarioId);
+    expect(first.comparisonMeta?.runId).toBe(second.comparisonMeta?.runId);
+    expect(first.comparisonMeta?.eligibleEstimatedStops).toBe(37);
+    for (const plan of first.comparison ?? []) {
+      expect(plan.totals.stops).toBe(37);
+      expect(plan.totals.estimatedStops).toBe(37);
+      expect(plan.totals.scheduledStops).toBe(37);
+    }
+    expect(first.comparison?.map((p) => p.totals.expectedSuccess)).toEqual(second.comparison?.map((p) => p.totals.expectedSuccess));
+    expect(first.comparison?.find((p) => p.method === "model")?.totals.modelExpectedSuccess).toBeGreaterThan(0);
+    expect(first.comparison?.find((p) => p.method === "rules")?.totals.modelExpectedSuccess).toBeNull();
+  });
+
+  it("invalidates a comparison when buyer commitments change", () => {
+    const initial = initialState();
+    const compared = comparePlans(initial);
+    expect(compared.comparisonMeta?.runId).toBe(comparisonRunIdFor(compared));
+    const stopId = shiftById(initial.shiftId).stops[0].id;
+    const changed = buyerConfirm(compared, stopId, "morning");
+    expect(comparisonRunIdFor(changed)).not.toBe(compared.comparisonMeta?.runId);
+  });
+
+  it("matches Calculation Sheet totals across all 12 rider-days", () => {
+    const expected = [
+      [37, 28.16, 30.55, 30.89, 866.1, 681.6], [33, 20.35, 22.95, 22.29, 832.8, 638.2],
+      [39, 28.73, 32.15, 32.95, 925.0, 699.8], [36, 23.58, 24.34, 23.04, 994.2, 798.3],
+      [34, 27.83, 29.13, 28.94, 736.4, 535.9], [32, 23.10, 26.00, 25.49, 839.5, 606.1],
+      [43, 31.24, 33.96, 33.25, 885.7, 711.3], [36, 22.36, 23.05, 21.97, 934.7, 765.3],
+      [39, 30.56, 33.21, 32.50, 885.1, 752.7], [36, 26.31, 26.94, 25.53, 946.5, 733.7],
+      [42, 32.53, 36.03, 35.35, 950.5, 736.0], [32, 20.13, 23.31, 21.46, 774.6, 614.3],
+    ] as const;
+    fixtures.shifts.forEach((shift, i) => {
+      const state = selectShift(initialState(), shift.id);
+      const plans = (["baseline", "rules", "model"] as const).map((method) => planFor(state, method));
+      const row = expected[i];
+      expect(shift.stops.length).toBe(row[0]);
+      expect(plans.map((p) => p.totals.stops)).toEqual([row[0], row[0], row[0]]);
+      for (const [methodIndex, plan] of plans.entries()) {
+        const success = methodIndex === 0 ? row[1] : methodIndex === 1 ? row[2] : row[3];
+        expect(plan.totals.expectedSuccess).toBeCloseTo(success, 1);
+        if (methodIndex < 2) {
+          const minutes = methodIndex === 0 ? row[4] : row[5];
+          expect(plan.totals.onRoadMin).toBeCloseTo(minutes, 1);
+        }
+        if (methodIndex === 2) {
+          expect(plan.totals.modelExpectedSuccess).not.toBeNull();
+          expect(plan.totals.modelExpectedSuccess).toBeGreaterThanOrEqual(0);
+          expect(plan.totals.modelExpectedSuccess).toBeLessThanOrEqual(row[0]);
+        }
+      }
+    });
   });
 });
 

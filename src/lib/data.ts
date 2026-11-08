@@ -66,3 +66,26 @@ export function shiftById(id: string): Shift {
   if (!s) throw new Error(`Unknown shift ${id}`);
   return s;
 }
+
+// A single approved batch is registered locally so every existing planner screen can consume it.
+import type { ImportBatch } from "./intake";
+const IMPORT_KEY = "s-compass-import-v1";
+let activeImport: ImportBatch | null = null;
+export function activeImportBatch() { return activeImport; }
+export function setImported(batch: ImportBatch | null) {
+  fixtures.riders = fixtures.riders.filter((x) => !x.id.startsWith("imp-"));
+  fixtures.shifts = fixtures.shifts.filter((x) => !x.id.startsWith("imp-"));
+  fixtures.knowledge = fixtures.knowledge.filter((x) => !x.key.startsWith("imp-"));
+  for (const key of Object.keys(knowledgeByKey)) if (key.startsWith("imp-")) delete knowledgeByKey[key];
+  activeImport = batch;
+  if (!batch) return;
+  fixtures.riders.push(...batch.riders); fixtures.shifts.push(...batch.shifts); fixtures.knowledge.push(...batch.knowledge);
+  for (const item of batch.knowledge) knowledgeByKey[item.key] = item;
+}
+export function saveImportedLocal(batch: ImportBatch | null): string | null {
+  try { if (batch) localStorage.setItem(IMPORT_KEY, JSON.stringify(batch)); else localStorage.removeItem(IMPORT_KEY); return null; }
+  catch { return "Import could not be saved for reload in this browser; it remains active until this tab closes."; }
+}
+export function loadImportedLocal(): ImportBatch | null {
+  try { const raw = localStorage.getItem(IMPORT_KEY); return raw ? JSON.parse(raw) as ImportBatch : null; } catch { return null; }
+}

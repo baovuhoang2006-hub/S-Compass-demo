@@ -27,8 +27,8 @@
   --color-info-tint: #e8eef8;
 
   /* Delivery blocks */
-  --color-morning: #3d7cc9;
-  --color-afternoon: #d18a12;
+  --color-morning: #356daf;
+  --color-afternoon: #a66300;
   --color-evening: #4b3f8f;
 }
 
@@ -49,11 +49,44 @@ body {
   outline-offset: 2px;
 }
 
+.ui-select {
+  transition: background-color 160ms ease, border-color 160ms ease,
+    stroke 160ms ease, stroke-opacity 160ms ease, opacity 160ms ease,
+    box-shadow 160ms ease;
+}
+
+@keyframes panel-reveal {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.ui-reveal,
+.dialog-surface[data-state="open"],
+.dialog-overlay[data-state="open"] {
+  animation: panel-reveal 180ms ease-out;
+}
+
+.dialog-surface[data-state="closed"],
+.dialog-overlay[data-state="closed"] {
+  animation: panel-reveal 140ms ease-in reverse;
+}
+
+@supports (interpolate-size: allow-keywords) {
+  .ui-disclosure::details-content {
+    interpolate-size: allow-keywords;
+    height: 0;
+    overflow: clip;
+    transition: height 180ms ease, content-visibility 180ms allow-discrete;
+  }
+  .ui-disclosure[open]::details-content { height: auto; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

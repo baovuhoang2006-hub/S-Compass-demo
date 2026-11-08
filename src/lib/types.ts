@@ -151,14 +151,31 @@ export interface PlanTotals {
   stops: number;
   expectedSuccess: number;
   estimatedStops: number;
+  /** Experimental logistic-regression total; null when the plan did not use model scoring. */
+  modelExpectedSuccess: number | null;
+  modelEstimatedStops: number;
   distanceKm: number;
   onRoadMin: number;
+  scheduledStops: number;
   endMin: number;
   evening: number;
   lowChance: number;
   flagged: number;
   confirmedKept: number;
   confirmedTotal: number;
+}
+
+export interface ComparisonMetadata {
+  scenarioId: string;
+  runId: string;
+  createdAt: string;
+  dataset: string;
+  planner: string;
+  methods: PlanMethod[];
+  totalStops: number;
+  eligibleEstimatedStops: number;
+  timeDenominator: string;
+  successMetric: string;
 }
 
 export interface Plan {

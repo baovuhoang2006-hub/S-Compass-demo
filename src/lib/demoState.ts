@@ -1,10 +1,10 @@
-import { BACKUP_RIDER, allPickupPoints, fixtures, riderById, riderOfShift, shiftById } from "./data";
+import { BACKUP_RIDER, fixtures, riderById, riderOfShift, shiftById } from "./data";
 import type { EvidenceEvent, Role } from "./evidence";
-import { applyCorrection, buildCard, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
+import { applyCorrection, buildCard, knowledgeSnapshot, reviewValue, RESTRICTION_PRESETS, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
 import { makePlan } from "./planner";
 import { compareRemaining, type ReplanProposal, type ReplanTrigger } from "./replan";
-import { SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
-import type { Block, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
+import { BLOCKS, SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
+import type { Block, ComparisonMetadata, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
 
 export interface BuyerMessage {
   id: string;
@@ -35,6 +35,7 @@ export interface DemoState {
   stopStates: Record<string, Record<string, StopState>>;
   draftPlan: Plan | null;
   comparison: Plan[] | null;
+  comparisonMeta: ComparisonMetadata | null;
   currentPlan: Record<string, Plan | null>;
   clockMin: Record<string, number>;
   proposals: ReplanProposal[];
@@ -46,10 +47,6 @@ export interface DemoState {
 /** Label of the rider who owns a shift, e.g. "Rider A · Minh". */
 export function riderLabel(shiftId: string) {
   return riderOfShift(shiftById(shiftId)).label;
-}
-
-function demoToday(shiftId: string) {
-  return shiftById(shiftId).date;
 }
 
 let counter = 0;
@@ -89,6 +86,7 @@ export function initialState(): DemoState {
     stopStates: initialStopStates(),
     draftPlan: null,
     comparison: null,
+    comparisonMeta: null,
     currentPlan: Object.fromEntries(fixtures.shifts.map((s) => [s.id, null])),
     clockMin: Object.fromEntries(fixtures.shifts.map((s) => [s.id, SHIFT_START])),
     proposals: [],
@@ -156,6 +154,24 @@ export function planFor(state: DemoState, method: PlanMethod): Plan {
   });
 }
 
+/** Stable identifier for the inputs used by a KPI comparison, excluding draft plans and event-log noise. */
+export function comparisonRunIdFor(state: DemoState): string {
+  const shift = shiftById(state.shiftId);
+  const snapshot = JSON.stringify({
+    shiftId: shift.id,
+    date: shift.date,
+    stops: shift.stops,
+    stopStates: state.stopStates[state.shiftId],
+    cards: cardsFor(state),
+    outcomes: state.outcomes,
+    start: riderPosition(state),
+  });
+  let hash = 2166136261;
+  for (let i = 0; i < snapshot.length; i++) hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
+  const fingerprint = (hash >>> 0).toString(16).padStart(8, "0");
+  return `compare-${shift.id}-${fingerprint}`;
+}
+
 function describePlan(p: Plan) {
   return `${p.totals.stops} stops · expected ${p.totals.expectedSuccess.toFixed(1)} successful first attempts (of ${p.totals.estimatedStops} estimated) · ${p.totals.distanceKm.toFixed(1)} km · ends ${fmt(p.totals.endMin)} · ${p.totals.flagged} flagged`;
 }
@@ -165,9 +181,44 @@ export function selectRider(state: DemoState, riderId: string): DemoState {
   return selectShift(state, riderById(riderId).shiftIds[0]);
 }
 
+export function ensureShiftState(state: DemoState, shiftId: string): DemoState {
+  const shift = shiftById(shiftId);
+  const existing = state.stopStates[shiftId] ?? {};
+  const validIds = new Set(shift.stops.map((stop) => stop.id));
+  const stopStates = Object.fromEntries(shift.stops.map((stop) => [
+    stop.id,
+    existing[stop.id] ?? { status: "pending", buyer: { kind: "none" } } as StopState,
+  ]));
+  const needsStopStateRepair = Object.keys(existing).length !== shift.stops.length || shift.stops.some((stop) => !existing[stop.id]) || Object.keys(existing).some((id) => !validIds.has(id));
+  if (!needsStopStateRepair && shiftId in state.currentPlan && shiftId in state.clockMin) return state;
+  return { ...state,
+    stopStates: { ...state.stopStates, [shiftId]: stopStates },
+    currentPlan: { ...state.currentPlan, [shiftId]: state.currentPlan[shiftId] ?? null },
+    clockMin: { ...state.clockMin, [shiftId]: state.clockMin[shiftId] ?? SHIFT_START },
+  };
+}
+
 export function selectShift(state: DemoState, shiftId: string): DemoState {
-  const s = { ...state, shiftId, draftPlan: null, comparison: null };
+  const s = { ...ensureShiftState(state, shiftId), shiftId, draftPlan: null, comparison: null, comparisonMeta: null };
   return log(s, { type: "shift_selected", summary: `Selected ${riderLabel(shiftId)}, ${shiftById(shiftId).weekday} ${shiftById(shiftId).date} shift` });
+}
+
+export function recordImport(state: DemoState, summary: string, details: string): DemoState {
+  return log(state, { type: "data_imported", role: "dispatcher", summary, input: details });
+}
+export function recordImportRemoved(state: DemoState): DemoState {
+  const fallbackShift = fixtures.shifts.find((s) => !s.id.startsWith("imp-"))?.id ?? fixtures.shifts[0].id;
+  const back = {
+    ...state,
+    shiftId: state.shiftId.startsWith("imp-") ? fallbackShift : state.shiftId,
+    stopStates: Object.fromEntries(Object.entries(state.stopStates).filter(([id]) => !id.startsWith("imp-"))),
+    currentPlan: Object.fromEntries(Object.entries(state.currentPlan).filter(([id]) => !id.startsWith("imp-"))),
+    clockMin: Object.fromEntries(Object.entries(state.clockMin).filter(([id]) => !id.startsWith("imp-"))),
+    draftPlan: state.draftPlan?.shiftId.startsWith("imp-") ? null : state.draftPlan,
+    comparison: state.comparison?.some((plan) => plan.shiftId.startsWith("imp-")) ? null : state.comparison,
+    comparisonMeta: state.comparisonMeta?.scenarioId.startsWith("imp-") ? null : state.comparisonMeta,
+  };
+  return log(back, { type: "data_import_removed", role: "dispatcher", summary: "Imported data removed; demo fixtures kept" });
 }
 
 export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
@@ -185,7 +236,39 @@ export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
 
 export function comparePlans(state: DemoState): DemoState {
   const plans = (["baseline", "rules", "model"] as PlanMethod[]).map((m) => planFor(state, m));
-  const s = { ...state, comparison: plans };
+  const commonEligibleIds = new Set(plans[0].stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
+  for (const plan of plans.slice(1)) {
+    const eligible = new Set(plan.stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
+    for (const id of commonEligibleIds) if (!eligible.has(id)) commonEligibleIds.delete(id);
+  }
+  for (const plan of plans) {
+    const comparable = plan.stops.filter((s) => !s.fixed && commonEligibleIds.has(s.stopId));
+    plan.totals.expectedSuccess = comparable.reduce((sum, stop) => sum + (stop.p ?? 0), 0);
+    plan.totals.estimatedStops = comparable.length;
+    plan.totals.modelExpectedSuccess = plan.method === "model"
+      ? comparable.reduce((sum, stop) => sum + (stop.pModel ?? 0), 0)
+      : null;
+    plan.totals.modelEstimatedStops = plan.method === "model"
+      ? comparable.filter((stop) => stop.pModel !== null).length
+      : 0;
+  }
+  const shift = shiftById(state.shiftId);
+  const eligibleEstimatedStops = commonEligibleIds.size;
+  const comparisonMeta: ComparisonMetadata = {
+    scenarioId: `${shift.id}:${shift.date}`,
+    runId: comparisonRunIdFor(state),
+    createdAt: new Date().toISOString(),
+    dataset: shift.id.startsWith("imp-")
+      ? "User-imported browser-only batch (validated; imported orders only)"
+      : "Bundled de-identified demo fixtures (baseline f16db9c)",
+    planner: "src/lib/planner.ts (rules and model weights unchanged from baseline f16db9c)",
+    methods: ["baseline", "rules", "model"],
+    totalStops: plans[0].totals.stops,
+    eligibleEstimatedStops,
+    timeDenominator: "Total pending stops in this scenario; scheduled stop count is shown per method.",
+    successMetric: "Common history-table expected first attempts on the same eligible stop IDs; Model prediction is reported separately on that same set.",
+  };
+  const s = { ...state, comparison: plans, comparisonMeta };
   return log(s, {
     type: "plans_compared",
     role: "dispatcher",
@@ -200,7 +283,7 @@ export function dispatchPlan(state: DemoState, plan: Plan): DemoState {
     ...state,
     currentPlan: { ...state.currentPlan, [state.shiftId]: plan },
     draftPlan: null,
-    proposals: state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "overridden" as const, decisionNote: "Superseded by a newly dispatched plan" } : p)),
+    proposals: state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "superseded" as const, supersededBy: plan.id, decisionNote: "Superseded by a newly dispatched plan" } : p)),
   };
   return log(s, { type: "plan_dispatched", role: "dispatcher", summary: `Dispatched ${plan.method} plan to ${riderLabel(state.shiftId)}`, output: describePlan(plan) });
 }
@@ -209,77 +292,91 @@ export function openCard(state: DemoState, key: string, from: string): DemoState
   return log(state, { type: "stop_card_opened", summary: `Opened stop card ${cardsFor(state)[key].name}`, input: from });
 }
 
-export function suggestCorrection(
-  state: DemoState,
-  key: string,
-  field: CorrectionField,
-  text: string,
-  restrictionCode?: WindowRestriction["code"],
-): DemoState {
+/** Upgrade legacy browser confirmation flags without inventing missing evidence. */
+export function restoreKnowledgeReviews(state: DemoState): DemoState {
+  let next = state;
+  for (const [key, overlay] of Object.entries(state.overlays)) {
+    if (!overlay.verificationRequested || !cardsFor(state)[key]) continue;
+    if (next.corrections.some((c) => c.locationKey === key && c.field === "confirmation" && c.status === "pending")) continue;
+    next = { ...next, corrections: [...next.corrections, {
+      id: `legacy-confirmation-${key}`, locationKey: key, field: "confirmation",
+      text: "Legacy on-site confirmation flag; original submission details were not recorded",
+      proposedBy: "Not recorded (legacy demo)", createdAt: "", status: "pending",
+      snapshot: knowledgeSnapshot(cardsFor(state)[key]),
+      provenance: "Restored browser flag; no timestamp or actor inferred. Not a real field inspection.",
+    }] };
+  }
+  return next;
+}
+
+function submitKnowledgeRequest(state: DemoState, key: string, field: Correction["field"], text: string, restrictionCode?: WindowRestriction["code"]): DemoState {
+  const card = cardsFor(state)[key];
+  if (!card || !["dispatcher", "rider"].includes(state.role) || !text.trim()) return state;
+  if ((field === "confirmation" || field === "dispute") && state.role !== "rider") return state;
+  if (field === "confirmation" && state.corrections.some((c) => c.locationKey === key && c.field === field && c.status === "pending")) return state;
   const c: Correction = {
-    id: uid("corr"),
-    locationKey: key,
-    field,
-    text,
-    restrictionCode,
+    id: uid("review"), locationKey: key, field, text: text.trim(), restrictionCode,
     proposedBy: state.role === "rider" ? riderLabel(state.shiftId) : "Dispatcher",
-    createdAt: new Date().toISOString(),
-    status: "pending",
+    createdAt: new Date().toISOString(), status: "pending",
+    snapshot: knowledgeSnapshot(card), previousValue: reviewValue(card, field),
+    provenance: `Browser demo ${state.role} report · session ${state.sessionId}; not independently field-verified`,
   };
-  const s = { ...state, corrections: [...state.corrections, c] };
-  return log(s, {
-    type: "correction_suggested",
-    summary: `Correction for ${cardsFor(state)[key].name}: ${field.replace("_", " ")}`,
-    input: text,
-    output: "Pending dispatcher review; card unchanged until approved",
+  return log({ ...state, corrections: [...state.corrections, c] }, {
+    type: field === "confirmation" ? "verification_requested" : field === "dispute" ? "dispute_reported" : "correction_suggested",
+    summary: `${field === "confirmation" ? "On-site confirmation" : field === "dispute" ? "Dispute report" : "Correction"} for ${card.name}`,
+    input: JSON.stringify(c), output: "Pending dispatcher review; official knowledge and dispatched plans unchanged",
   });
+}
+
+export function suggestCorrection(state: DemoState, key: string, field: CorrectionField, text: string, restrictionCode?: WindowRestriction["code"]): DemoState {
+  if (!["entrance", "handover", "access", "receiving_window"].includes(field)) return state;
+  if (field === "receiving_window" && !RESTRICTION_PRESETS.some((p) => p.code === restrictionCode && p.text === text.trim())) return state;
+  return submitKnowledgeRequest(state, key, field, text, restrictionCode);
+}
+
+/** A stale report must be re-submitted; an unresolved dispute must be reviewed first. */
+export function knowledgeReviewBlocker(state: DemoState, c: Correction): string | null {
+  const card = cardsFor(state)[c.locationKey];
+  if (!card) return "Site no longer available. Reject this request and review the source.";
+  if (!c.text.trim() || !["entrance", "handover", "access", "receiving_window", "confirmation", "dispute"].includes(c.field)) return "Invalid request content. Reject and request a new observation.";
+  if (c.field === "receiving_window" && !RESTRICTION_PRESETS.some((p) => p.code === c.restrictionCode && p.text === c.text.trim())) return "Receiving rule does not match a supported preset. Reject and resubmit.";
+  if (c.field !== "dispute" && state.corrections.some((x) => x.locationKey === c.locationKey && x.field === "dispute" && x.status === "pending")) return "Review the pending dispute before approving other knowledge.";
+  if (c.snapshot && c.snapshot !== knowledgeSnapshot(card)) return "Site knowledge changed after submission. Reject and request a new observation.";
+  return null;
 }
 
 export function decideCorrection(state: DemoState, id: string, approve: boolean, note?: string): DemoState {
   const c = state.corrections.find((x) => x.id === id);
-  if (!c || c.status !== "pending") return state;
-  const date = demoToday(state.shiftId);
-  const corrections = state.corrections.map((x) =>
-    x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedAt: new Date().toISOString(), decidedBy: "Dispatcher", note } : x,
-  );
-  const overlays = approve ? { ...state.overlays, [c.locationKey]: applyCorrection(state.overlays[c.locationKey], c, date, "Dispatcher") } : state.overlays;
-  const s = { ...state, corrections, overlays };
-  return log(s, {
-    type: approve ? "correction_approved" : "correction_rejected",
-    role: "dispatcher",
-    summary: `${approve ? "Approved" : "Rejected"} correction for ${cardsFor(state)[c.locationKey].name}`,
-    input: c.text,
-    output: approve ? "Card status → verified; the next plan uses this information" : note || "Card unchanged",
+  if (state.role !== "dispatcher" || !c || c.status !== "pending") return state;
+  if (approve && knowledgeReviewBlocker(state, c)) return state;
+  const at = new Date().toISOString();
+  const corrections = state.corrections.map((x) => x.id === id ? { ...x, status: approve ? "approved" as const : "rejected" as const, decidedAt: at, decidedBy: "Dispatcher", note } : x);
+  let overlay = state.overlays[c.locationKey];
+  if (approve) {
+    if (c.field === "dispute") overlay = { ...overlay, status: "disputed", disputeReason: c.text };
+    else if (c.field === "confirmation") overlay = { ...overlay, status: "verified", datasetRulesVerified: true, lastVerified: at, verifiedBy: "Dispatcher (demo review)", verificationRequested: false, disputeReason: undefined,
+      source: `Browser demo confirmation from ${c.proposedBy}, approved by Dispatcher; not a real field inspection` };
+    else overlay = applyCorrection(overlay, c, at, "Dispatcher (demo review)");
+  }
+  // Retire a migrated legacy flag on either decision; never recreate rejected requests.
+  if (c.field === "confirmation" && overlay?.verificationRequested) overlay = { ...overlay, verificationRequested: false };
+  const overlays = overlay === state.overlays[c.locationKey] ? state.overlays : { ...state.overlays, [c.locationKey]: overlay ?? {} };
+  const type = c.field === "confirmation" ? (approve ? "card_verified" : "verification_rejected") : c.field === "dispute" ? (approve ? "card_disputed" : "dispute_rejected") : (approve ? "correction_approved" : "correction_rejected");
+  return log({ ...state, corrections, overlays }, {
+    type, summary: `${approve ? "Approved" : "Rejected"} ${c.field} request for ${cardsFor(state)[c.locationKey]?.name ?? c.locationKey}`,
+    input: JSON.stringify({ request: c, decision: approve ? "approved" : "rejected", decidedAt: at, note }),
+    output: approve ? "Reviewed site knowledge updated for future plans only; dispatched routes, outcomes and buyer commitments preserved" : "Official knowledge unchanged",
   });
 }
 
+/** Rider confirmation is always a pending review, including for already verified cards. */
 export function verifyCard(state: DemoState, key: string): DemoState {
-  const name = cardsFor(state)[key].name;
-  if (state.role !== "dispatcher") {
-    const s = { ...state, overlays: { ...state.overlays, [key]: { ...state.overlays[key], verificationRequested: true } } };
-    return log(s, { type: "verification_requested", summary: `Rider confirmed details at ${name} — awaiting dispatcher`, output: "Status unchanged until dispatcher approves" });
-  }
-  const s = {
-    ...state,
-    overlays: {
-      ...state.overlays,
-      [key]: {
-        ...state.overlays[key],
-        status: "verified" as const,
-        lastVerified: demoToday(state.shiftId),
-        verifiedBy: "Dispatcher",
-        verificationRequested: false,
-        source: state.overlays[key]?.verificationRequested ? `Confirmed on site by ${riderLabel(state.shiftId)}, approved by dispatcher` : "Checked by dispatcher",
-        disputeReason: undefined,
-      },
-    },
-  };
-  return log(s, { type: "card_verified", role: "dispatcher", summary: `Verified stop card ${name}`, output: "Restrictions on this card become hard constraints in the next plan" });
+  return submitKnowledgeRequest(state, key, "confirmation", "Existing delivery-site instructions confirmed on site (demo report)");
 }
 
+/** Flag a report for review without weakening approved constraints or changing routes. */
 export function disputeCard(state: DemoState, key: string, reason: string): DemoState {
-  const s = { ...state, overlays: { ...state.overlays, [key]: { ...state.overlays[key], status: "disputed" as const, disputeReason: reason } } };
-  return log(s, { type: "card_disputed", summary: `Disputed stop card ${cardsFor(state)[key].name}`, input: reason, output: "Restrictions treated as soft until resolved" });
+  return submitKnowledgeRequest(state, key, "dispute", reason);
 }
 
 function addMessage(state: DemoState, stopId: string, from: BuyerMessage["from"], text: string): DemoState {
@@ -296,7 +393,25 @@ function plannedBlock(state: DemoState, stopId: string): Block | null {
   return p?.stops.find((s) => s.stopId === stopId)?.block ?? null;
 }
 
+/** Pending order and current receiving constraints, shared by Buyer UI and demo scenarios. */
+export function feasibleBuyerBlocks(state: DemoState, stopId: string): Block[] {
+  const shift = shiftById(state.shiftId);
+  const stop = shift.stops.find((s) => s.id === stopId);
+  if (!stop || state.stopStates[state.shiftId]?.[stopId]?.status !== "pending") return [];
+  const rules = cardsFor(state)[stop.locationKey].restrictions.filter((r) => r.strength === "hard");
+  return BLOCKS.filter((b) => b.end > state.clockMin[state.shiftId] && !rules.some((r) =>
+    (r.weekdaysOnly && shift.isWeekend) || (r.blocks && !r.blocks.includes(b.id)) ||
+    (r.earliestMin !== undefined && r.earliestMin >= b.end) || (r.latestMin !== undefined && r.latestMin < b.start),
+  )).map((b) => b.id);
+}
+
+function pendingOrder(state: DemoState, id: string): boolean {
+  return shiftById(state.shiftId).stops.some((s) => s.id === id) && state.stopStates[state.shiftId]?.[id]?.status === "pending";
+}
+
 export function inviteBuyer(state: DemoState, stopId: string, offered: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(offered)) return state;
+  if (["confirmed", "changed", "pickup"].includes(state.stopStates[state.shiftId][stopId].buyer.kind)) return state;
   let s = setBuyer(state, stopId, { kind: "invited", offeredBlock: offered, at: new Date().toISOString() });
   s = addMessage(s, stopId, "S-Compass", `Your parcel is planned for ${blockLabel(offered)}. Reply: confirm, pick another window, or choose a pickup point. (Simulated in-app message — nothing is sent.)`);
   return log(s, { type: "buyer_invited", role: "dispatcher", summary: `Invited buyer of ${stopId} to confirm`, output: `Offered ${blockLabel(offered)}` });
@@ -308,18 +423,21 @@ function propose(state: DemoState, trigger: ReplanTrigger): DemoState {
   if (!prev) return state;
   const proposed = planFor(state, prev.method);
   const diff = compareRemaining(prev, proposed, state.stopStates[state.shiftId], trigger);
-  const proposal: ReplanProposal = { ...diff, id: uid("rp"), createdAt: new Date().toISOString(), status: "open" };
-  const s = { ...state, proposals: [...state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "overridden" as const, decisionNote: "Replaced by a newer proposal" } : p)), proposal] };
+  const proposal: ReplanProposal = { ...diff, id: uid("rp"), createdAt: new Date().toISOString(), status: "open", inputDigest: replanInputDigest(state) };
+  let s = { ...state, proposals: [...state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "superseded" as const, supersededBy: proposal.id, decisionNote: "Replaced by a newer proposal" } : p)), proposal] };
+  const superseded = state.proposals.filter((p) => p.status === "open" && p.previous.shiftId === state.shiftId);
+  if (superseded.length) s = log(s, { type: "replan_superseded", summary: "Pending proposals replaced by newer inputs (not a rejection)", input: superseded.map((p) => p.id).join(", "), output: `New proposal ${proposal.id}` });
   return log(s, {
     type: "replan_proposed",
-    role: "dispatcher",
     summary: diff.triggerText,
-    output: `${diff.changes.length} stops change block or ETA by 15+ min · ${diff.commitments[0]}`,
+    input: `System-generated proposal ${proposal.id}; event initiator role: ${state.role}; awaiting Dispatcher decision`,
+    output: `${diff.changes.length} stops change destination, position, block or ETA by 15+ min · ${diff.commitments[0]}`,
     computeMs: proposed.computeMs,
   });
 }
 
 export function buyerConfirm(state: DemoState, stopId: string, block: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(block)) return state;
   let s = setBuyer(state, stopId, { kind: "confirmed", block, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `Confirmed: ${blockLabel(block)}.`);
   s = log(s, { type: "buyer_confirmed", role: "buyer", summary: `Buyer of ${stopId} confirmed ${blockInfo(block).label.toLowerCase()}`, output: "Window becomes a commitment the planner must keep" });
@@ -329,6 +447,7 @@ export function buyerConfirm(state: DemoState, stopId: string, block: Block): De
 }
 
 export function buyerChange(state: DemoState, stopId: string, block: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(block)) return state;
   const pb = plannedBlock(state, stopId);
   let s = setBuyer(state, stopId, { kind: "changed", block, previous: pb, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `Please deliver in the ${blockLabel(block)} window instead.`);
@@ -338,15 +457,19 @@ export function buyerChange(state: DemoState, stopId: string, block: Block): Dem
 }
 
 export function buyerPickup(state: DemoState, stopId: string, pickupId: string): DemoState {
-  const pp = allPickupPoints.find((p) => p.id === pickupId)!;
+  const pp = riderOfShift(shiftById(state.shiftId)).pickupPoints.find((p) => p.id === pickupId);
+  if (!pendingOrder(state, stopId) || !pp || !Array.isArray(pp.pos) || pp.pos.length !== 2 || !pp.pos.every(Number.isFinite)) return state;
   let s = setBuyer(state, stopId, { kind: "pickup", pickupId, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `I will collect it at ${pp.name}.`);
-  s = log(s, { type: "buyer_pickup", role: "buyer", summary: `Buyer of ${stopId} chose ${pp.name}`, output: "Stop moves to the pickup point; success effect not estimated (no data)" });
+  s = log(s, { type: "buyer_pickup", role: "buyer", summary: `Buyer of ${stopId} chose ${pp.name}`, output: "Pickup request stored; dispatched plan changes only after Dispatcher approval. Success effect not estimated (no data)" });
   if (current(state)) s = propose(s, { kind: "buyer_pickup", stopId, pickupName: pp.name });
   return s;
 }
 
 export function buyerNoResponse(state: DemoState, stopId: string): DemoState {
+  if (!pendingOrder(state, stopId)) return state;
+  const response = state.stopStates[state.shiftId][stopId].buyer;
+  if (["confirmed", "changed", "pickup"].includes(response.kind)) return state;
   const prevBuyer = state.stopStates[state.shiftId][stopId].buyer;
   let s = setBuyer(state, stopId, { kind: "no_response", at: new Date().toISOString() });
   s = addMessage(s, stopId, "S-Compass", "No reply received. The order stays in the plan; the rider calls on arrival. (The order is NOT cancelled.)");
@@ -361,8 +484,10 @@ export function buyerNoResponse(state: DemoState, stopId: string): DemoState {
 
 export function reportEntranceClosed(state: DemoState, stopId: string, untilMin: number | null, useAlternate: boolean): DemoState {
   const shift = shiftById(state.shiftId);
-  const stop = shift.stops.find((x) => x.id === stopId)!;
+  const stop = shift.stops.find((x) => x.id === stopId);
+  if (!stop || !pendingOrder(state, stopId) || (untilMin !== null && (!Number.isFinite(untilMin) || untilMin < state.clockMin[state.shiftId]))) return state;
   const card = cardsFor(state)[stop.locationKey];
+  if (useAlternate && !card.alternateEntrance) return state;
   const detail = useAlternate
     ? `use ${card.alternateEntrance ?? "alternate entrance"} instead`
     : untilMin === null
@@ -383,18 +508,109 @@ export function reportOtherIssue(state: DemoState, stopId: string, text: string)
   return log(state, { type: "issue_reported", summary: `Issue at ${stopId}`, input: text, output: "Logged for dispatcher; no automatic plan change" });
 }
 
+/** Replanning safety snapshot excludes event-log noise and the currently selected demo role. */
+function replanInputDigest(state: DemoState): string {
+  return JSON.stringify({ run: comparisonRunIdFor(state), plan: current(state) });
+}
+
+export function proposalAcceptanceBlocker(state: DemoState, p: ReplanProposal): string | null {
+  if (p.status !== "open") return "This proposal has already been decided or superseded.";
+  const active = current(state);
+  if (!active || p.previous.shiftId !== state.shiftId || p.proposed.shiftId !== state.shiftId) return "Select the proposal's dispatched shift before reviewing it.";
+  if (!p.inputDigest) return "Legacy proposal has no safety snapshot. Create a fresh proposal before acceptance.";
+  if (p.inputDigest !== replanInputDigest(state) || JSON.stringify(p.previous) !== JSON.stringify(active)) return "Inputs, completed stops or dispatched plan changed. Create a fresh proposal; the newer state is preserved.";
+  const proposedIds = p.proposed.stops.map((s) => s.stopId);
+  const expectedIds = active.stops.map((s) => s.stopId);
+  if (new Set(proposedIds).size !== proposedIds.length || JSON.stringify([...proposedIds].sort()) !== JSON.stringify([...expectedIds].sort())) return "Proposal contains missing, duplicate or unexpected orders.";
+  const shift = shiftById(state.shiftId);
+  const states = state.stopStates[state.shiftId];
+  const cards = cardsFor(state);
+  const completed = active.stops.filter((s) => ["delivered", "failed"].includes(states[s.stopId]?.status));
+  for (const [i, before] of completed.entries()) {
+    const after = p.proposed.stops[i];
+    if (!after || JSON.stringify({ ...before, seq: 0, fixed: true }) !== JSON.stringify({ ...after, seq: 0 })) return "Proposal would alter completed deliveries.";
+  }
+  for (const stop of p.proposed.stops) {
+    if (states[stop.stopId]?.status !== "pending") continue;
+    if (stop.fixed) return `Pending order ${stop.stopId} must not be marked completed.`;
+    const buyer = states[stop.stopId].buyer;
+    const scheduled = Number.isFinite(stop.arriveMin);
+    if ((buyer.kind === "confirmed" || buyer.kind === "changed") && (!scheduled || stop.block !== buyer.block || stop.arriveMin < blockInfo(buyer.block).start || stop.arriveMin > blockInfo(buyer.block).end)) return `${stop.stopId}: buyer commitment is at risk. Contact the buyer and create a feasible proposal.`;
+    if (buyer.kind === "pickup") {
+      const pp = riderOfShift(shift).pickupPoints.find((p) => p.id === buyer.pickupId);
+      if (!pp || stop.pointSource !== "pickup point" || !stop.point || stop.point[0] !== pp.pos[0] || stop.point[1] !== pp.pos[1]) return `${stop.stopId}: pickup destination is invalid or does not match the request.`;
+      if (stop.p !== null || stop.pModel !== null) return `${stop.stopId}: pickup success has no data and must not have an invented estimate.`;
+    }
+    if (!scheduled) {
+      if (!stop.flags.length) return `${stop.stopId}: unscheduled order needs a visible review warning.`;
+      continue; // Explicitly held orders stay in the plan and require follow-up.
+    }
+    const block = BLOCKS.find((b) => b.id === stop.block);
+    if (!block) return `${stop.stopId}: invalid delivery block.`;
+    if (!Number.isFinite(stop.departMin) || stop.departMin < stop.arriveMin) return `${stop.stopId}: invalid processing/ETA values.`;
+    if (stop.pointSource === "pickup point") continue; // Original site's rules do not apply at a pickup point.
+    const site = shift.stops.find((s) => s.id === stop.stopId)!;
+    const violation = cards[site.locationKey].restrictions.find((r) => r.strength === "hard" && (
+      (r.weekdaysOnly && shift.isWeekend) || (r.blocks && (!r.blocks.includes(stop.block) || !r.blocks.some((b) => stop.arriveMin >= blockInfo(b).start && stop.arriveMin <= blockInfo(b).end))) ||
+      (r.earliestMin !== undefined && stop.arriveMin < r.earliestMin) || (r.latestMin !== undefined && stop.arriveMin > r.latestMin)
+    ));
+    if (violation) return `${stop.stopId}: violates ${violation.text}. Review the site restriction before proceeding.`;
+  }
+  return null;
+}
+
+/** Explain outstanding requests after an operator explicitly keeps the existing route. */
+export function unresolvedReplanWarnings(state: DemoState): string[] {
+  const active = current(state);
+  if (!active || state.proposals.some((p) => p.status === "open" && p.previous.shiftId === state.shiftId) || !state.proposals.some((p) => p.status === "overridden" && p.previous.shiftId === state.shiftId && !/^(Replaced|Superseded) by/.test(p.decisionNote ?? ""))) return [];
+  const shift = shiftById(state.shiftId);
+  const cards = cardsFor(state);
+  return active.stops.flatMap((s) => {
+    const st = state.stopStates[state.shiftId][s.stopId];
+    if (st?.status !== "pending") return [];
+    const buyer = st.buyer;
+    const warnings: string[] = [];
+    if ((buyer.kind === "changed" || buyer.kind === "confirmed") && (!Number.isFinite(s.arriveMin) || s.block !== buyer.block || s.arriveMin > blockInfo(buyer.block).end)) warnings.push(`${s.stopId}: current route does not satisfy the buyer's ${blockLabel(buyer.block)} request. Contact the buyer and review a new plan; the commitment is retained.`);
+    if (buyer.kind === "pickup") {
+      const pp = riderOfShift(shift).pickupPoints.find((p) => p.id === buyer.pickupId);
+      if (!pp || s.pointSource !== "pickup point" || !s.point || s.point[0] !== pp.pos[0] || s.point[1] !== pp.pos[1]) warnings.push(`${s.stopId}: pickup request remains unresolved. Contact the buyer and review a new plan; do not deliver to the old site without agreement.`);
+    }
+    const closure = cards[shift.stops.find((x) => x.id === s.stopId)!.locationKey].temporaryClosure;
+    if (closure && s.pointSource !== "pickup point" && !closure.useAlternate && Number.isFinite(s.arriveMin) && (closure.untilMin === null || s.arriveMin < closure.untilMin)) warnings.push(`${s.stopId}: the current route still uses an unavailable entrance. Stop and contact Dispatcher; review an alternate entrance or a new plan.`);
+    return warnings;
+  });
+}
+
 export function decideProposal(state: DemoState, id: string, accept: boolean, note?: string): DemoState {
   const p = state.proposals.find((x) => x.id === id);
-  if (!p || p.status !== "open") return state;
-  const proposals = state.proposals.map((x) => (x.id === id ? { ...x, status: accept ? ("accepted" as const) : ("overridden" as const), decisionNote: note } : x));
+  if (state.role !== "dispatcher" || !p || p.status !== "open" || p.previous.shiftId !== state.shiftId) return state;
+  if (accept && proposalAcceptanceBlocker(state, p)) return state;
+  if (!accept && !note?.trim()) return state;
+  const proposals = state.proposals.map((x) => x.id === id ? { ...x, status: accept ? "accepted" as const : "overridden" as const, decisionNote: note?.trim(), decidedAt: new Date().toISOString(), decidedBy: "Dispatcher" } : x);
   let s: DemoState = { ...state, proposals };
-  if (accept) s = { ...s, currentPlan: { ...s.currentPlan, [p.proposed.shiftId]: p.proposed } };
+  if (accept) s = { ...s, currentPlan: { ...s.currentPlan, [state.shiftId]: p.proposed } };
   return log(s, {
-    type: accept ? "replan_accepted" : "replan_overridden",
-    summary: `${accept ? "Accepted" : "Overrode"} plan change: ${p.triggerText}`,
-    input: note,
-    output: accept ? describePlan(p.proposed) : "Previous sequence kept",
+    type: accept ? "replan_accepted" : "replan_overridden", role: "dispatcher",
+    summary: `${accept ? "Accepted" : "Kept current plan for"} plan change: ${p.triggerText}`,
+    input: `Proposal ${p.id}; ${note ?? "Dispatcher accepted after current-input and hard-constraint validation"}`,
+    output: accept ? describePlan(p.proposed) : `Previous route kept; buyer requests and closure reports retained. Follow-up: ${unresolvedReplanWarnings(s).join(" | ") || "Review unresolved requests and contact the buyer/rider before continuing."}`,
   });
+}
+
+export type DemoReplanEvent =
+  | { kind: "window"; stopId: string; block: Block }
+  | { kind: "pickup"; stopId: string; pickupId: string }
+  | { kind: "closure"; stopId: string; untilMin: number | null; useAlternate: boolean };
+
+export function simulateReplanScenario(state: DemoState, event: DemoReplanEvent): DemoState {
+  if (!current(state) || !pendingOrder(state, event.stopId)) return state;
+  const asRole: Role = event.kind === "closure" ? "rider" : "buyer";
+  const started = log(state, { type: "demo_scenario_triggered", summary: `SIMULATED ${event.kind} event initiated by demo operator`, input: JSON.stringify({ operatorRole: state.role, simulatedActorRole: asRole, event }), output: "Simulation only; no external message or automatic dispatch" });
+  const demoEventId = started.events.at(-1)!.id;
+  const eventState = { ...started, role: asRole };
+  const result = event.kind === "window" ? buyerChange(eventState, event.stopId, event.block) : event.kind === "pickup" ? buyerPickup(eventState, event.stopId, event.pickupId) : reportEntranceClosed(eventState, event.stopId, event.untilMin, event.useAlternate);
+  if (result === eventState) return state; // Discard the tentative log; invalid input is not a successful scenario.
+  return { ...result, role: state.role, proposals: result.proposals.map((p) => !state.proposals.some((old) => old.id === p.id) ? { ...p, demoEventId } : p) };
 }
 
 export function recordOutcome(state: DemoState, stopId: string, outcome: "delivered" | "failed", reason?: string): DemoState {

@@ -1,0 +1,16 @@
+{
+  "desktop": {
+    "window": true,
+    "pickup": true,
+    "closure": true,
+    "actualEntriesHistoryStaleAndEvidence": true
+  },
+  "mobile": {
+    "window": true,
+    "pickup": true,
+    "closure": true,
+    "actualEntriesHistoryStaleAndEvidence": true
+  },
+  "actualBuyerPickupAndNoResponse": true,
+  "importedEmptyPickup": true
+}

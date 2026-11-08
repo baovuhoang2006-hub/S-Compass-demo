@@ -4,14 +4,14 @@ import { CalendarCheck, CalendarClock, MessageSquareOff, Send, Store } from "luc
 import Link from "next/link";
 import * as React from "react";
 import { BlockTag, ChanceText, TYPE_LABEL } from "@/components/bits";
-import { ProposalReview } from "@/components/ProposalReview";
+import { PlanFollowUp, ProposalReview } from "@/components/ProposalReview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { riderOfShift } from "@/lib/data";
-import { buyerChange, buyerConfirm, buyerNoResponse, buyerPickup, confirmEligibility, inviteBuyer } from "@/lib/demoState";
+import { buyerChange, buyerConfirm, buyerNoResponse, buyerPickup, confirmEligibility, feasibleBuyerBlocks, inviteBuyer } from "@/lib/demoState";
+import { planSiteLabel } from "@/lib/replan";
 import { BLOCKS, blockLabel } from "@/lib/time";
-import type { Block } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
@@ -24,31 +24,36 @@ export default function BuyerPage() {
   const eligible = withWhy.filter((x) => x.why.length);
   const others = withWhy.filter((x) => !x.why.length);
   const [sel, setSel] = React.useState<string>(eligible[0]?.s.id ?? pendingStops[0]?.id ?? "");
-  const stop = shift.stops.find((s) => s.id === sel);
-  const ps = shown?.stops.find((x) => x.stopId === sel);
+  const stop = pendingStops.find((s) => s.id === sel) ?? pendingStops[0];
+  const selectedId = stop?.id ?? "";
+  const ps = shown?.stops.find((x) => x.stopId === selectedId);
   const buyer = stop ? states[stop.id].buyer : null;
-  const msgs = state.messages.filter((m) => m.stopId === sel);
+  const msgs = state.messages.filter((m) => m.stopId === selectedId);
   const card = stop ? cards[stop.locationKey] : null;
-  const proposal = state.proposals.find((p) => p.status === "open" && p.previous.shiftId === shift.id && "stopId" in p.trigger && p.trigger.stopId === sel);
-  const lastProposal = [...state.proposals].reverse().find((p) => p.previous.shiftId === shift.id && "stopId" in p.trigger && p.trigger.stopId === sel);
+  const proposal = state.proposals.find((p) => p.status === "open" && p.previous.shiftId === shift.id && "stopId" in p.trigger && p.trigger.stopId === selectedId);
+  const lastProposal = [...state.proposals].reverse().find((p) => p.previous.shiftId === shift.id && "stopId" in p.trigger && p.trigger.stopId === selectedId);
 
-  // Feasible windows: blocks not ruled out by verified site rules and not already over
-  const feasible: Block[] = BLOCKS.filter((b) => b.end > state.clockMin[shift.id])
-    .map((b) => b.id)
-    .filter((b) => !card?.restrictions.some((r) => r.strength === "hard" && ((r.blocks && !r.blocks.includes(b)) || (r.weekdaysOnly && shift.isWeekend))));
-  const offered = ps && !Number.isNaN(ps.arriveMin) ? ps.block : feasible[0];
+  const feasible = stop ? feasibleBuyerBlocks(state, stop.id) : [];
+  const offered = ps && Number.isFinite(ps.arriveMin) ? ps.block : feasible[0];
+  const pickupPoints = riderOfShift(shift).pickupPoints.filter((p) => Array.isArray(p.pos) && p.pos.length === 2 && p.pos.every(Number.isFinite));
+  const pickupChoices = stop ? pickupPoints.length ? pickupPoints.map((p) => (
+    <Button key={p.id} variant="outline" className="h-auto min-h-10 w-full justify-start py-2 text-left" onClick={() => update((s) => buyerPickup(s, stop.id, p.id))}>
+      <Store /> Collect at {p.name.replace(" (demo pickup point)", "")} ({p.hours || "Hours not recorded"})
+    </Button>
+  )) : <p className="text-xs text-warn">No valid pickup points configured for this rider.</p> : null;
 
   return (
     <div className="space-y-4">
       <div className="rounded-lg border border-warn/40 bg-warn-tint px-4 py-2 text-sm text-warn">
         Demo interaction: you act as the buyer. Messages are simulated inside this page; no SMS, e-mail or payment request is sent.
       </div>
+      <PlanFollowUp />
       <div className="grid gap-5 lg:grid-cols-[380px_minmax(0,1fr)]">
         <Panel>
           <PanelHeader title="Choose a demo order" note="Buyer Confirm targets risky orders first (rule shown under each order)" />
           <div className="max-h-[620px] overflow-y-auto">
-            <OrderGroup title={`Eligible for Buyer Confirm (${eligible.length})`} items={eligible} sel={sel} setSel={setSel} />
-            <OrderGroup title={`Other pending orders (${others.length})`} items={others} sel={sel} setSel={setSel} />
+            <OrderGroup title={`Eligible for Buyer Confirm (${eligible.length})`} items={eligible} sel={selectedId} setSel={setSel} />
+            <OrderGroup title={`Other pending orders (${others.length})`} items={others} sel={selectedId} setSel={setSel} />
           </div>
         </Panel>
 
@@ -58,7 +63,7 @@ export default function BuyerPage() {
               <div className="bg-brand px-4 py-3 text-white">
                 <p className="text-sm font-semibold">Delivery update · {stop.buyer}</p>
                 <p className="text-xs opacity-90">
-                  Order {stop.id} to {card.name}
+                  Order {stop.id} · {shown ? "Planned destination" : "Site"}: {shown ? planSiteLabel(shown, stop.id, shift, cards, pickupPoints) : card.name}
                 </p>
               </div>
               <div className="min-h-[260px] space-y-2 bg-canvas p-3">
@@ -74,13 +79,15 @@ export default function BuyerPage() {
               </div>
               <div className="space-y-2 border-t border-line p-3">
                 {buyer.kind === "none" || buyer.kind === "no_response" ? (
-                  <Button variant="dark" className="w-full" disabled={!offered} onClick={() => offered && update((s) => inviteBuyer(s, stop.id, offered))}>
+                  <Button variant="dark" className="w-full" disabled={!offered || !feasible.includes(offered)} onClick={() => offered && update((s) => inviteBuyer(s, stop.id, offered))}>
                     <Send /> Send confirmation request {offered ? `(${BLOCKS.find((b) => b.id === offered)!.label.toLowerCase()})` : ""}
                   </Button>
                 ) : null}
+                {!feasible.length ? <p className="text-xs text-warn">No feasible receiving window is available. Ask Dispatcher to review site constraints; no window will be invented.</p> : null}
+                {(buyer.kind === "none" || buyer.kind === "no_response") && !feasible.length ? pickupChoices : null}
                 {buyer.kind === "invited" ? (
                   <>
-                    <Button variant="primary" className="w-full" onClick={() => update((s) => buyerConfirm(s, stop.id, buyer.offeredBlock))}>
+                    <Button variant="primary" className="w-full" disabled={!feasible.includes(buyer.offeredBlock)} onClick={() => update((s) => buyerConfirm(s, stop.id, buyer.offeredBlock))}>
                       <CalendarCheck /> Confirm {blockLabel(buyer.offeredBlock)}
                     </Button>
                     <div className="grid grid-cols-1 gap-2">
@@ -92,11 +99,7 @@ export default function BuyerPage() {
                           </Button>
                         ))}
                     </div>
-                    {riderOfShift(shift).pickupPoints.map((p) => (
-                      <Button key={p.id} variant="outline" className="w-full justify-start" onClick={() => update((s) => buyerPickup(s, stop.id, p.id))}>
-                        <Store /> Collect at {p.name.replace(" (demo pickup point)", "")} ({p.hours})
-                      </Button>
-                    ))}
+                    {pickupChoices}
                     <Button variant="ghost" className="w-full" onClick={() => update((s) => buyerNoResponse(s, stop.id))}>
                       <MessageSquareOff /> Leave unanswered
                     </Button>
@@ -113,7 +116,7 @@ export default function BuyerPage() {
                 <PanelHeader title="This order" />
                 <dl className="grid grid-cols-2 gap-3 px-4 py-3 text-sm">
                   <div>
-                    <dt className="text-xs text-ink-faint">Site</dt>
+                    <dt className="text-xs text-ink-faint">Original site</dt>
                     <dd>
                       {card.name} <span className="text-ink-faint">({TYPE_LABEL[card.type]})</span>
                     </dd>
@@ -124,7 +127,7 @@ export default function BuyerPage() {
                   </div>
                   <div>
                     <dt className="text-xs text-ink-faint">Planned</dt>
-                    <dd>{ps && !Number.isNaN(ps.arriveMin) ? <BlockTag block={ps.block} eta={ps.arriveMin} /> : "No plan yet"}</dd>
+                    <dd>{ps && Number.isFinite(ps.arriveMin) ? <BlockTag block={ps.block} eta={ps.arriveMin} /> : ps ? "Not scheduled" : "No plan yet"}</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-ink-faint">Chance in planned block</dt>
@@ -153,9 +156,7 @@ export default function BuyerPage() {
                   ) : buyer.kind === "no_response" ? (
                     <p className="text-sm text-ink-soft">No reply. The order stays in the plan as before and is not cancelled. The rider calls on arrival.</p>
                   ) : lastProposal ? (
-                    <p className="text-sm text-ink-soft">
-                      The last plan change for this order was {lastProposal.status}. <Link className="text-info underline" href="/replan">See replanning</Link>
-                    </p>
+                    <ProposalReview proposal={lastProposal} compact />
                   ) : (
                     <p className="text-sm text-ink-soft">Send a confirmation request, then answer as the buyer.</p>
                   )}

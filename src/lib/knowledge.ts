@@ -7,7 +7,11 @@ export type CorrectionField = "entrance" | "handover" | "access" | "receiving_wi
 export interface Correction {
   id: string;
   locationKey: string;
-  field: CorrectionField;
+  field: CorrectionField | "confirmation" | "dispute";
+  /** Approved instructions when submitted; detects stale/conflicting reviews. */
+  snapshot?: string;
+  previousValue?: string;
+  provenance?: string;
   text: string;
   restrictionCode?: WindowRestriction["code"];
   proposedBy: string;
@@ -20,6 +24,8 @@ export interface Correction {
 
 export interface CardOverlay {
   status?: CardStatus;
+  /** A field correction alone does not verify unrelated dataset window rules. */
+  datasetRulesVerified?: boolean;
   entrance?: string;
   handover?: string;
   extraAccess?: string[];
@@ -99,14 +105,15 @@ export function buildCard(
   const o = overlay ?? {};
   const status: CardStatus = o.status ?? defaultStatus(rec);
   const verified = status === "verified";
+  const datasetRulesVerified = verified && o.datasetRulesVerified !== false;
 
   const datasetSource = `Dataset notes from ${rec.visits} visits (1–30 Sep 2026)`;
   const restrictions: ActiveRestriction[] = [];
   const seen = new Set<string>();
   for (const r of rec.windowRestrictions) {
-    if (seen.has(r.code)) continue;
+    if (seen.has(r.code) || o.extraWindows?.some((w) => w.restriction?.code === r.code)) continue;
     seen.add(r.code);
-    const a = toActive(r, verified ? "hard" : "soft", verified ? "Verified card" : `Suggested from ${r.count} dataset notes`);
+    const a = toActive(r, datasetRulesVerified ? "hard" : "soft", datasetRulesVerified ? "Verified card" : `Suggested from ${r.count} dataset notes`);
     if (a) restrictions.push(a);
   }
   for (const w of o.extraWindows ?? []) {
@@ -135,13 +142,12 @@ export function buildCard(
     if (oc.outcome === "delivered") history[k].delivered += 1;
   }
 
-  const entranceDefault = rec.entranceNotes[0]?.text ?? "No entrance information yet";
+  const entranceDefault = rec.entranceNotes[0]?.text ?? "Not recorded — confirm at site";
   const alternate = rec.entranceNotes.length > 1 ? rec.entranceNotes[1].text : null;
 
   let entranceSource: string;
-  if (verified) entranceSource = `Verified by ${o.verifiedBy ?? "hub"} on ${o.lastVerified ?? "—"}`;
-  else if (rec.entranceCandidate)
-    entranceSource = `Suggested drop-off point: centre of successful dataset pins. Pins for this site spread about ${rec.pinSpreadMeters ?? "?"} m, so a pin is not a verified entrance.`;
+  if (rec.entranceCandidate)
+    entranceSource = `Suggested drop-off point: centre of successful dataset pins, not an independently verified entrance. Pins for this site spread about ${rec.pinSpreadMeters ?? "?"} m, so a pin is not a verified entrance.`;
   else entranceSource = "No usable pin in the dataset";
 
   return {
@@ -153,9 +159,9 @@ export function buildCard(
     entrancePoint: rec.entranceCandidate,
     entranceSource,
     alternateEntrance: alternate,
-    handover: o.handover ?? rec.handoverNotes[0]?.text ?? "Not recorded yet — ask at the gate",
+    handover: o.handover ?? rec.handoverNotes[0]?.text ?? "Not recorded — confirm at site",
     access: [...rec.accessNotes.map((n) => n.text), ...(o.extraAccess ?? [])],
-    receivingWindows: [...rec.windowNotes.map((n) => n.text), ...(o.extraWindows ?? []).map((w) => w.text)],
+    receivingWindows: Array.from(new Set([...rec.windowNotes.map((n) => n.text), ...(o.extraWindows ?? []).map((w) => w.text)])),
     restrictions,
     serviceMinutes: rec.serviceMinutesMedian,
     source: o.source ?? datasetSource,
@@ -179,10 +185,33 @@ export function applyCorrection(overlay: CardOverlay | undefined, c: Correction,
     const preset = RESTRICTION_PRESETS.find((p) => p.code === c.restrictionCode);
     o.extraWindows = [...(o.extraWindows ?? []), { text: c.text, restriction: preset?.restriction }];
   }
+  o.datasetRulesVerified = overlay?.status === "verified" && overlay?.datasetRulesVerified !== false;
   o.status = "verified";
   o.lastVerified = date;
   o.verifiedBy = approver;
-  o.source = `Rider correction by ${c.proposedBy}, approved by ${approver}`;
+  o.source = `Browser demo correction by ${c.proposedBy}, approved by ${approver}; not a real field inspection`;
   o.disputeReason = undefined;
   return o;
+}
+
+/** Only operational knowledge: history/outcomes do not make a review stale. */
+export function knowledgeSnapshot(card: StopCard): string {
+  return JSON.stringify([card.status, card.entrance, card.handover, card.access, card.receivingWindows, card.restrictions]);
+}
+
+export function reviewValue(card: StopCard, field: Correction["field"]): string {
+  if (field === "entrance") return card.entrance;
+  if (field === "handover") return card.handover;
+  if (field === "access") return card.access.join("; ") || "Not recorded";
+  if (field === "receiving_window") return card.receivingWindows.join("; ") || "Not recorded";
+  return `${card.status} · ${card.entrance} · ${card.handover}`;
+}
+
+export function reviewLabel(field: Correction["field"]): string {
+  return field === "confirmation" ? "On-site confirmation" : field === "dispute" ? "Dispute report" : `Correction: ${field.replaceAll("_", " ")}`;
+}
+
+export function conflictingReviews(request: Correction, requests: Correction[]): boolean {
+  return request.field !== "confirmation" && request.field !== "dispute" && requests.some((other) =>
+    other.id !== request.id && other.status === "pending" && other.locationKey === request.locationKey && other.field === request.field && other.text !== request.text);
 }
