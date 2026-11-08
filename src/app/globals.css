@@ -4,7 +4,9 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 
   /* Surfaces and ink */
-  --color-canvas: #f2f4f7;
+  --color-canvas: #e9eff8;
+  --color-navy: #0f1b3d;
+  --color-navy-2: #1d2f6b;
   --color-surface: #ffffff;
   --color-line: #e1e5ec;
   --color-ink: #14213d;
@@ -27,16 +29,14 @@
   --color-info-tint: #e8eef8;
 
   /* Delivery blocks */
-  --color-morning: #356daf;
-  --color-afternoon: #a66300;
+  --color-morning: #3d7cc9;
+  --color-afternoon: #d18a12;
   --color-evening: #4b3f8f;
 }
 
 html,
 body {
-  background:
-    radial-gradient(1100px 520px at 50% -240px, #e7edf7 0%, rgba(231, 237, 247, 0) 70%),
-    var(--color-canvas);
+  background: radial-gradient(900px 380px at 100% 0%, rgba(238, 77, 45, 0.07), transparent 70%), radial-gradient(700px 360px at 0% 30%, rgba(47, 93, 158, 0.07), transparent 70%), var(--color-canvas);
   background-attachment: fixed;
   color: var(--color-ink);
 }
