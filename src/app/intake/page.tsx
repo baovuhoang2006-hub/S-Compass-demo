@@ -81,6 +81,19 @@ export default function IntakePage() {
   const [requirementsOpen, setRequirementsOpen] = React.useState(false);
   const [riskRecorded, setRiskRecorded] = React.useState(false);
 
+  // Reset demo (from any page) clears the global import store and sets a new session id.
+  // This page keeps its own local copy of the checked/imported batch, so re-sync it here —
+  // otherwise Reset appears to do nothing until the user navigates away and back.
+  React.useEffect(() => {
+    const active = activeImportBatch();
+    setBatch(active);
+    setIsActive(active !== null);
+    setError(null);
+    setNote(null);
+    setRiskRecorded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.sessionId]);
+
   const check = (rows: unknown[][], fileName: string, sheet: string | null) => {
     setRiskRecorded(false);
     const t0 = performance.now();
