@@ -40,16 +40,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
-        <div className="sc-accent-bar h-[3px] w-full" aria-hidden />
+      <header className="sticky top-0 z-30 border-b border-white/10 bg-navy text-white shadow-lg">
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
           <Link href="/dispatcher" className="flex items-center gap-2.5" aria-label="S-Compass home">
-            <span className="sc-logo-tile grid size-9 place-items-center rounded-lg text-white shadow-sm">
+            <span className="grid size-9 place-items-center rounded-lg bg-brand text-white shadow-sm">
               <Compass className="size-5" aria-hidden />
             </span>
             <span className="leading-tight">
-              <span className="block text-[17px] font-semibold tracking-tight">S-Compass</span>
-              <span className="block text-[11px] text-ink-faint">Competition prototype</span>
+              <span className="block text-[17px] font-semibold tracking-tight text-white">S-Compass</span>
+              <span className="block text-[11px] text-white/60">Competition prototype</span>
             </span>
           </Link>
 
@@ -64,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {adapter.mode === "local" ? <HardDrive className="size-3.5" /> : <Database className="size-3.5" />}
               {adapter.mode === "local" ? "Demo Mode" : "Supabase"}
             </span>
-            <label className="flex items-center gap-1.5 text-xs text-ink-faint">
+            <label className="flex items-center gap-1.5 text-xs text-white/70">
               <span className="hidden sm:inline">Demo role</span>
               <select
                 aria-label="Demo role switcher (demo interaction, not a permission system)"
@@ -81,7 +80,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <TesterButton />
             <Dialog>
               <DialogTrigger asChild>
-                <Button size="sm" variant="ghost" aria-label="Reset demo">
+                <Button size="sm" variant="ghost" aria-label="Reset demo" className="text-white/80 hover:bg-white/10 hover:text-white">
                   <RotateCcw /> Reset demo
                 </Button>
               </DialogTrigger>
@@ -102,7 +101,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="mx-auto max-w-[1440px] overflow-x-auto px-2" aria-label="Main">
-          <ul className="flex min-w-max gap-1 px-2 py-1.5">
+          <ul className="flex min-w-max gap-1 px-2">
             {NAV.map((n) => {
               const active = pathname?.startsWith(n.href);
               const count = n.href === "/replan" ? openProposals : n.href === "/stops" ? pendingCorrections : 0;
@@ -112,8 +111,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     href={n.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
-                      active ? "bg-brand-tint font-semibold text-brand-ink" : "text-ink-soft hover:bg-canvas hover:text-ink",
+                      "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm transition-colors",
+                      active ? "border-brand font-semibold text-white" : "border-transparent text-white/65 hover:text-white",
                     )}
                   >
                     {n.label}
@@ -164,7 +163,7 @@ function TesterButton() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button size="sm" variant="ghost" title="Who is testing? Used in the evidence log">
+        <Button size="sm" variant="ghost" title="Who is testing? Used in the evidence log" className="text-white/80 hover:bg-white/10 hover:text-white">
           Tester: {state.tester.name || "not set"}
         </Button>
       </DialogTrigger>
