@@ -34,8 +34,26 @@
 
 html,
 body {
-  background: var(--color-canvas);
+  background:
+    radial-gradient(1100px 520px at 50% -240px, #e7edf7 0%, rgba(231, 237, 247, 0) 70%),
+    var(--color-canvas);
+  background-attachment: fixed;
   color: var(--color-ink);
+}
+
+/* Level 1 — page titles carry a short gradient underline so the hierarchy reads at a glance. */
+main h1 {
+  position: relative;
+  color: var(--color-ink);
+}
+main h1::after {
+  content: "";
+  display: block;
+  width: 46px;
+  height: 3px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-brand), #7a3ea8 70%);
 }
 
 body {
