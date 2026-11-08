@@ -19,7 +19,7 @@ const NAV: { href: string; label: string; role?: Role }[] = [
   { href: "/buyer", label: "Buyer simulation", role: "buyer" },
   { href: "/replan", label: "Replanning" },
   { href: "/evidence", label: "Evidence" },
-  { href: "/risk-challenge", label: "Risk Challenge", role: "dispatcher" },
+  { href: "/risk-challenge", label: "Risk desk", role: "dispatcher" },
   { href: "/how-it-works", label: "How it works" },
 ];
 
@@ -41,9 +41,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/95 backdrop-blur">
+        <div className="sc-accent-bar h-[3px] w-full" aria-hidden />
         <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5">
           <Link href="/dispatcher" className="flex items-center gap-2.5" aria-label="S-Compass home">
-            <span className="grid size-9 place-items-center rounded-lg bg-brand text-white">
+            <span className="sc-logo-tile grid size-9 place-items-center rounded-lg text-white shadow-sm">
               <Compass className="size-5" aria-hidden />
             </span>
             <span className="leading-tight">

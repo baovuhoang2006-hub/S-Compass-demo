@@ -25,7 +25,7 @@ export default function StopsPage() {
 
   return <div className="space-y-4">
     <div>
-      <h1 className="text-xl font-semibold">Site Knowledge</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Site Knowledge</h1>
       <p className="text-sm text-ink-soft">Review delivery-site knowledge, verify rider feedback, and manage instructions for future plans.</p>
       <p className="mt-1 text-sm font-medium">{rider.label} · {rider.zoneLabel} · {zoneCards.length} sites · {shift.weekday} {shift.date}</p>
       <details className="mt-3 rounded-lg border border-line bg-surface p-3 text-sm"><summary className="cursor-pointer font-medium">How verification works</summary><div className="mt-2 space-y-2 text-ink-soft">

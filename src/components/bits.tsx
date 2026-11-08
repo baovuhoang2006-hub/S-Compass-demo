@@ -91,7 +91,7 @@ export function Stat({ label, value, sub }: { label: string; value: React.ReactN
   return (
     <div className="min-w-0">
       <div className="text-xs text-ink-faint">{label}</div>
-      <div className="text-xl font-semibold leading-7">{value}</div>
+      <div className="text-2xl font-bold leading-8 tracking-tight">{value}</div>
       {sub ? <div className="text-xs text-ink-faint">{sub}</div> : null}
     </div>
   );
