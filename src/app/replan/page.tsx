@@ -44,7 +44,7 @@ export default function ReplanPage() {
   });
 
   return <div className="space-y-4">
-    <div><h1 className="text-2xl font-bold tracking-tight">Replanning</h1><p className="text-sm text-ink-soft">{riderOfShift(shift).label} · {shift.date} · Dispatcher reviews changes before the dispatched route is updated.</p><p className="mt-1 text-xs text-ink-faint">Demo role is a prototype selector, not real authentication. Simulated events never send external messages.</p></div>
+    <div><p className="text-sm text-ink-soft">{riderOfShift(shift).label} · {shift.date} · Dispatcher reviews changes before the dispatched route is updated.</p><p className="mt-1 text-xs text-ink-faint">Demo role is a prototype selector, not real authentication. Simulated events never send external messages.</p></div>
     <PlanFollowUp />
     <div className="grid items-start gap-5 lg:grid-cols-[360px_minmax(0,1fr)]">
       <details className="rounded-xl border border-line bg-surface p-4"><summary className="cursor-pointer font-semibold">Simulate a scenario</summary>

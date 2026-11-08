@@ -11,6 +11,8 @@ import { cn } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
 const ORDER: CardStatus[] = ["disputed", "unverified", "suggested", "verified"];
+// Status-coloured left edge, matching the card status badge.
+const EDGE_HEX: Record<CardStatus, string> = { verified: "#1e8e5a", suggested: "#d18a12", unverified: "#1d2f6b", disputed: "#b42318" };
 
 export default function StopsPage() {
   const { state, cards, shift } = useDemo();
@@ -49,7 +51,7 @@ export default function StopsPage() {
           const dispute = state.corrections.some((r) => r.locationKey === c.key && r.field === "dispute" && r.status === "pending");
           // Safety first: live closure, then hard rule, then access instruction, then a soft rule.
           const restriction = c.temporaryClosure?.text ?? c.restrictions.find((r) => r.strength === "hard")?.text ?? c.access[0] ?? c.restrictions[0]?.text;
-          return <li key={c.key}><button data-site-card={c.key} onClick={() => setOpen(c.key)} className="h-full w-full min-w-0 space-y-2 rounded-xl border border-line bg-surface p-4 text-left hover:border-ink-faint focus-visible:outline-2 focus-visible:outline-info">
+          return <li key={c.key}><button data-site-card={c.key} onClick={() => setOpen(c.key)} style={{ borderLeftColor: EDGE_HEX[c.status] }} className="sc-fade h-full w-full min-w-0 space-y-2 rounded-xl border border-l-4 border-line bg-surface p-4 text-left shadow-sm transition-shadow hover:border-ink-faint hover:shadow-md focus-visible:outline-2 focus-visible:outline-info">
             <div className="flex flex-wrap items-start justify-between gap-2"><span className="min-w-0 break-words font-semibold leading-5">{c.name}</span><CardStatusBadge status={c.status} /></div>
             <p className="text-xs text-ink-soft">{TYPE_LABEL[c.type]} · {orders} {orders === 1 ? "order" : "orders"} this shift</p>
             <p className="line-clamp-2 break-words text-sm"><span className="text-ink-faint">Entrance: </span>{c.entrance}</p>
