@@ -213,7 +213,6 @@ export default function IntakePage() {
     <div className="space-y-5">
       <Panel>
         <div className="space-y-2 border-b border-line px-5 py-4">
-          <h1 className="text-2xl font-bold tracking-tight">Data Intake</h1>
           <p className="text-base">Import and validate delivery orders from Excel or CSV before planning.</p>
           <p className="text-sm text-ink-soft">Valid orders proceed to planning. Records requiring review are flagged or quarantined.</p>
         </div>

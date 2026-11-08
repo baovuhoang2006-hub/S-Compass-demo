@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeftRight, BarChart3, Info, Send, Sparkles, TriangleAlert } from "lucide-react";
+import { ArrowLeftRight, BarChart3, Check, Info, Send, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 import { PlanFollowUp } from "@/components/ProposalReview";
@@ -44,6 +44,7 @@ export default function DispatcherPage() {
   const { state, update, shift, cards, plan } = useDemo();
   const [filter, setFilter] = React.useState<Filter>("all");
   const [compareOpen, setCompareOpen] = React.useState(false);
+  const [justSent, setJustSent] = React.useState(false);
   const [transferStop, setTransferStop] = React.useState<string | null>(null);
   const [selected, setSelected] = React.useState<string | null>(null);
   const deliveryTable = React.useRef<HTMLDivElement>(null);
@@ -154,9 +155,13 @@ export default function DispatcherPage() {
               <BarChart3 /> Compare Plans
             </Button>
             {draft ? (
-              <Button variant="dark" disabled={!!dispatchBlockReason} title={dispatchBlockReason ?? "Dispatch this draft plan"} onClick={() => update((s) => dispatchPlan(s, draft))}>
+              <Button variant="dark" disabled={!!dispatchBlockReason} title={dispatchBlockReason ?? "Dispatch this draft plan"} onClick={() => { update((s) => dispatchPlan(s, draft)); setJustSent(true); window.setTimeout(() => setJustSent(false), 2600); }}>
                 <Send /> Dispatch to rider
               </Button>
+            ) : justSent ? (
+              <span className="sc-check inline-flex items-center gap-2 rounded-lg bg-ok px-4 py-2 text-sm font-semibold text-white shadow-sm" role="status">
+                <Check className="size-4" /> Sent to rider
+              </span>
             ) : null}
           </div>
         </div>
@@ -473,12 +478,12 @@ function ProjectedImpact({ baseline, rules, sampleSize, totalPending, draftAlign
   return <div className="space-y-4">
     {!draftAligned ? <p role="status" className="rounded-md bg-warn-tint p-3 text-sm text-warn">This comparison uses current inputs; the existing draft differs. Choose Use as draft in the detailed comparison or generate a new proposed plan before dispatch review.</p> : null}
     <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-      <div className="rounded-lg border border-line bg-canvas/60 p-4">
+      <div className="sc-fade rounded-lg border border-line bg-canvas/60 p-4">
         <h3 className="font-semibold">Baseline</h3>
         <ImpactMetrics plan={baseline} minutes={baselineMinutes} />
       </div>
       <span aria-hidden="true" className="self-center justify-self-center text-2xl text-ink-faint rotate-90 md:rotate-0">→</span>
-      <div className="rounded-lg border border-brand/40 bg-brand-tint/30 p-4">
+      <div className="sc-fade [--d:0.12s] rounded-lg border border-brand/40 bg-brand-tint/30 p-4 shadow-sm">
         <h3 className="font-semibold text-brand-ink">S-Compass Rules-based</h3>
         <ImpactMetrics plan={rules} minutes={rulesMinutes} />
       </div>

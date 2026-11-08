@@ -23,6 +23,32 @@ const NAV: { href: string; label: string; role?: Role }[] = [
   { href: "/how-it-works", label: "How it works" },
 ];
 
+const BANNERS: Record<string, { title: string; text: string }> = {
+  "/dispatcher": { title: "Dispatcher", text: "Plan today’s deliveries, compare plans, and send the best one to the rider." },
+  "/intake": { title: "Data intake", text: "Bring in an Excel or CSV file: match the columns, review every row, then import." },
+  "/rider": { title: "Rider", text: "What the rider sees: the next stop, and why it comes now." },
+  "/stops": { title: "Stop cards", text: "Local knowledge for each delivery site, checked before it is trusted." },
+  "/buyer": { title: "Buyer simulation", text: "How a buyer confirms a delivery time. Simulated: no real messages are sent." },
+  "/replan": { title: "Replanning", text: "When something changes, the app proposes a new plan and the dispatcher decides." },
+  "/risk-challenge": { title: "Risk desk", text: "Overload, AI uncertainty and bad data: what the system does, live." },
+  "/evidence": { title: "Evidence", text: "Every action is logged, so the results can be checked." },
+  "/how-it-works": { title: "How it works", text: "The data, the scorer and the rules behind each plan." },
+};
+
+function PageBanner({ pathname }: { pathname: string | null }) {
+  const key = Object.keys(BANNERS).find((k) => pathname?.startsWith(k));
+  if (!key) return null;
+  const b = BANNERS[key];
+  return (
+    <div className="bg-gradient-to-r from-navy via-navy-2 to-[#c2381d]">
+      <div key={key} className="sc-fade mx-auto flex max-w-[1440px] flex-wrap items-baseline gap-x-4 gap-y-0.5 px-4 py-3 text-white">
+        <p className="text-xl font-semibold tracking-tight">{b.title}</p>
+        <p className="text-sm text-white/75">{b.text}</p>
+      </div>
+    </div>
+  );
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { state, update, reset, adapter, saveStatus, loadError } = useDemo();
@@ -124,6 +150,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </ul>
         </nav>
       </header>
+
+      <PageBanner pathname={pathname} />
 
       {loadError ? (
         <div role="alert" className="border-b border-bad/30 bg-bad-tint px-4 py-2 text-sm text-bad">
