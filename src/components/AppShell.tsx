@@ -102,7 +102,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="mx-auto max-w-[1440px] overflow-x-auto px-2" aria-label="Main">
-          <ul className="flex min-w-max gap-1 px-2">
+          <ul className="flex min-w-max gap-1 px-2 py-1.5">
             {NAV.map((n) => {
               const active = pathname?.startsWith(n.href);
               const count = n.href === "/replan" ? openProposals : n.href === "/stops" ? pendingCorrections : 0;
@@ -112,8 +112,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     href={n.href}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm",
-                      active ? "border-brand font-semibold text-ink" : "border-transparent text-ink-soft hover:text-ink",
+                      "flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm transition-colors",
+                      active ? "bg-brand-tint font-semibold text-brand-ink" : "text-ink-soft hover:bg-canvas hover:text-ink",
                     )}
                   >
                     {n.label}
