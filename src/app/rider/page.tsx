@@ -60,7 +60,7 @@ export default function RiderPage() {
     <div className="mx-auto w-full max-w-md space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 break-words">
-          <h1 className="text-lg font-semibold leading-6">{riderOfShift(shift).label}</h1>
+          <h1 className="text-2xl font-bold tracking-tight leading-tight">{riderOfShift(shift).label}</h1>
           <p className="text-sm text-ink-faint">
             {riderOfShift(shift).zoneLabel} · {shift.weekday} {shift.date} · {done.length}/{plan.stops.length} done
           </p>

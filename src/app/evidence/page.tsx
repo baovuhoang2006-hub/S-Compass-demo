@@ -47,7 +47,7 @@ export default function EvidencePage() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Evidence</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Evidence</h1>
           <p className="max-w-3xl text-sm text-ink-soft">
             Every number here comes from interactions in this session ({state.sessionId}). Nothing is pre-filled. Set a tester name and persona in the header so test logs can be traced.
           </p>

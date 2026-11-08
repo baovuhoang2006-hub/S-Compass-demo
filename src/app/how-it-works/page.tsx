@@ -28,7 +28,7 @@ export default function HowItWorks() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">How S-Compass decides</h1>
+        <h1 className="text-2xl font-bold tracking-tight">How S-Compass decides</h1>
         <p className="mt-1 max-w-3xl text-ink-soft">
           Every plan in this prototype is computed in your browser by the logic below. The success estimates come from the Strategy Round dataset; times and
           distances are simulated with the assumptions listed at the end.

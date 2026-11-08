@@ -68,7 +68,7 @@ export default function RiskChallengePage() {
 
   return <div className="space-y-5">
     <div>
-      <h1 className="text-xl font-semibold">Risk Challenge</h1>
+      <h1 className="text-2xl font-bold tracking-tight">Risk desk</h1>
       <p className="mt-1 text-sm text-ink-soft">Test a risk. See what is protected. Choose the next action.</p>
       <p className="mt-2 text-xs text-ink-faint">Isolated demo tests · no external AI API · no measured production load test</p>
     </div>
