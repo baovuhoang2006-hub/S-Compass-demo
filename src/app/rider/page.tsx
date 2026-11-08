@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, Clock, DoorOpen, FileText, Flag, MapPin, Nav
 import Link from "next/link";
 import * as React from "react";
 import { BlockTag, CardStatusBadge, ChanceText, EmptyState, SourceTag, TYPE_LABEL } from "@/components/bits";
-import { ProposalReview } from "@/components/ProposalReview";
+import { PlanFollowUp, ProposalReview } from "@/components/ProposalReview";
 import { StopCardDialog } from "@/components/StopCardDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,6 +73,7 @@ export default function RiderPage() {
         </div>
       </div>
 
+      <PlanFollowUp />
       {proposal ? (
         <div className="rounded-xl border-2 border-brand bg-surface">
           <div className="rounded-t-[10px] bg-brand px-4 py-2 text-sm font-semibold text-white">Plan change proposed</div>

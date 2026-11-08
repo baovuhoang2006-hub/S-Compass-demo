@@ -1,5 +1,5 @@
 import { blockInfo, fmt } from "./time";
-import type { Plan, StopState } from "./types";
+import type { Plan, StopState, StopCard, Shift, PickupPoint } from "./types";
 
 export type ReplanTrigger =
   | { kind: "buyer_window"; stopId: string; from: string; to: string }
@@ -30,7 +30,12 @@ export interface ReplanProposal {
   reasons: string[];
   commitments: string[];
   transferNeeded: boolean;
-  status: "open" | "accepted" | "overridden";
+  status: "open" | "accepted" | "overridden" | "superseded";
+  inputDigest?: string;
+  decidedAt?: string;
+  decidedBy?: string;
+  supersededBy?: string;
+  demoEventId?: string;
   decisionNote?: string;
 }
 
@@ -70,8 +75,7 @@ export function compareRemaining(
     const afterPos = b ? nextIds.indexOf(id) + 1 : null;
     const etaA = a && !Number.isNaN(a.arriveMin) ? a.arriveMin : null;
     const etaB = b && !Number.isNaN(b.arriveMin) ? b.arriveMin : null;
-    const moved = !a || !b || a.block !== b.block || etaA === null || etaB === null ? true : Math.abs(etaA - etaB) >= 15;
-    void beforePos;
+    const moved = !a || !b || beforePos !== afterPos || a.block !== b.block || a.pointSource !== b.pointSource || JSON.stringify(a.point) !== JSON.stringify(b.point) || etaA === null || etaB === null ? true : Math.abs(etaA - etaB) >= 15;
     if (moved)
       changes.push({
         stopId: id,
@@ -122,4 +126,20 @@ export function compareRemaining(
     commitments,
     transferNeeded: false,
   };
+}
+
+/** Resolve historical destinations from each plan, not the latest buyer response. */
+export function planSiteLabel(plan: Plan, stopId: string, shift: Shift, cards: Record<string, StopCard>, pickups: PickupPoint[]): string {
+  const planned = plan.stops.find((s) => s.stopId === stopId);
+  if (planned?.pointSource === "pickup point") {
+    const matches = pickups.filter((p) => planned.point && p.pos[0] === planned.point[0] && p.pos[1] === planned.point[1]);
+    return matches.length === 1 ? matches[0].name : "Pickup point (name unavailable)";
+  }
+  const stop = shift.stops.find((s) => s.id === stopId);
+  return stop ? cards[stop.locationKey]?.name ?? "Site unavailable" : "Order unavailable";
+}
+
+export function proposalStatusLabel(proposal: ReplanProposal): string {
+  if (proposal.status === "superseded" || (proposal.status === "overridden" && /^(Replaced|Superseded) by/.test(proposal.decisionNote ?? ""))) return "Superseded";
+  return proposal.status === "overridden" ? "Current plan kept" : proposal.status === "accepted" ? "Accepted" : "Awaiting Dispatcher";
 }

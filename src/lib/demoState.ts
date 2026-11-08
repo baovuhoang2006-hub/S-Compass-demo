@@ -1,9 +1,9 @@
-import { BACKUP_RIDER, allPickupPoints, fixtures, riderById, riderOfShift, shiftById } from "./data";
+import { BACKUP_RIDER, fixtures, riderById, riderOfShift, shiftById } from "./data";
 import type { EvidenceEvent, Role } from "./evidence";
 import { applyCorrection, buildCard, knowledgeSnapshot, reviewValue, RESTRICTION_PRESETS, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
 import { makePlan } from "./planner";
 import { compareRemaining, type ReplanProposal, type ReplanTrigger } from "./replan";
-import { SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
+import { BLOCKS, SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
 import type { Block, ComparisonMetadata, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
 
 export interface BuyerMessage {
@@ -283,7 +283,7 @@ export function dispatchPlan(state: DemoState, plan: Plan): DemoState {
     ...state,
     currentPlan: { ...state.currentPlan, [state.shiftId]: plan },
     draftPlan: null,
-    proposals: state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "overridden" as const, decisionNote: "Superseded by a newly dispatched plan" } : p)),
+    proposals: state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "superseded" as const, supersededBy: plan.id, decisionNote: "Superseded by a newly dispatched plan" } : p)),
   };
   return log(s, { type: "plan_dispatched", role: "dispatcher", summary: `Dispatched ${plan.method} plan to ${riderLabel(state.shiftId)}`, output: describePlan(plan) });
 }
@@ -393,7 +393,25 @@ function plannedBlock(state: DemoState, stopId: string): Block | null {
   return p?.stops.find((s) => s.stopId === stopId)?.block ?? null;
 }
 
+/** Pending order and current receiving constraints, shared by Buyer UI and demo scenarios. */
+export function feasibleBuyerBlocks(state: DemoState, stopId: string): Block[] {
+  const shift = shiftById(state.shiftId);
+  const stop = shift.stops.find((s) => s.id === stopId);
+  if (!stop || state.stopStates[state.shiftId]?.[stopId]?.status !== "pending") return [];
+  const rules = cardsFor(state)[stop.locationKey].restrictions.filter((r) => r.strength === "hard");
+  return BLOCKS.filter((b) => b.end > state.clockMin[state.shiftId] && !rules.some((r) =>
+    (r.weekdaysOnly && shift.isWeekend) || (r.blocks && !r.blocks.includes(b.id)) ||
+    (r.earliestMin !== undefined && r.earliestMin >= b.end) || (r.latestMin !== undefined && r.latestMin < b.start),
+  )).map((b) => b.id);
+}
+
+function pendingOrder(state: DemoState, id: string): boolean {
+  return shiftById(state.shiftId).stops.some((s) => s.id === id) && state.stopStates[state.shiftId]?.[id]?.status === "pending";
+}
+
 export function inviteBuyer(state: DemoState, stopId: string, offered: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(offered)) return state;
+  if (["confirmed", "changed", "pickup"].includes(state.stopStates[state.shiftId][stopId].buyer.kind)) return state;
   let s = setBuyer(state, stopId, { kind: "invited", offeredBlock: offered, at: new Date().toISOString() });
   s = addMessage(s, stopId, "S-Compass", `Your parcel is planned for ${blockLabel(offered)}. Reply: confirm, pick another window, or choose a pickup point. (Simulated in-app message — nothing is sent.)`);
   return log(s, { type: "buyer_invited", role: "dispatcher", summary: `Invited buyer of ${stopId} to confirm`, output: `Offered ${blockLabel(offered)}` });
@@ -405,18 +423,21 @@ function propose(state: DemoState, trigger: ReplanTrigger): DemoState {
   if (!prev) return state;
   const proposed = planFor(state, prev.method);
   const diff = compareRemaining(prev, proposed, state.stopStates[state.shiftId], trigger);
-  const proposal: ReplanProposal = { ...diff, id: uid("rp"), createdAt: new Date().toISOString(), status: "open" };
-  const s = { ...state, proposals: [...state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "overridden" as const, decisionNote: "Replaced by a newer proposal" } : p)), proposal] };
+  const proposal: ReplanProposal = { ...diff, id: uid("rp"), createdAt: new Date().toISOString(), status: "open", inputDigest: replanInputDigest(state) };
+  let s = { ...state, proposals: [...state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "superseded" as const, supersededBy: proposal.id, decisionNote: "Replaced by a newer proposal" } : p)), proposal] };
+  const superseded = state.proposals.filter((p) => p.status === "open" && p.previous.shiftId === state.shiftId);
+  if (superseded.length) s = log(s, { type: "replan_superseded", summary: "Pending proposals replaced by newer inputs (not a rejection)", input: superseded.map((p) => p.id).join(", "), output: `New proposal ${proposal.id}` });
   return log(s, {
     type: "replan_proposed",
-    role: "dispatcher",
     summary: diff.triggerText,
-    output: `${diff.changes.length} stops change block or ETA by 15+ min · ${diff.commitments[0]}`,
+    input: `System-generated proposal ${proposal.id}; event initiator role: ${state.role}; awaiting Dispatcher decision`,
+    output: `${diff.changes.length} stops change destination, position, block or ETA by 15+ min · ${diff.commitments[0]}`,
     computeMs: proposed.computeMs,
   });
 }
 
 export function buyerConfirm(state: DemoState, stopId: string, block: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(block)) return state;
   let s = setBuyer(state, stopId, { kind: "confirmed", block, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `Confirmed: ${blockLabel(block)}.`);
   s = log(s, { type: "buyer_confirmed", role: "buyer", summary: `Buyer of ${stopId} confirmed ${blockInfo(block).label.toLowerCase()}`, output: "Window becomes a commitment the planner must keep" });
@@ -426,6 +447,7 @@ export function buyerConfirm(state: DemoState, stopId: string, block: Block): De
 }
 
 export function buyerChange(state: DemoState, stopId: string, block: Block): DemoState {
+  if (!feasibleBuyerBlocks(state, stopId).includes(block)) return state;
   const pb = plannedBlock(state, stopId);
   let s = setBuyer(state, stopId, { kind: "changed", block, previous: pb, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `Please deliver in the ${blockLabel(block)} window instead.`);
@@ -435,15 +457,19 @@ export function buyerChange(state: DemoState, stopId: string, block: Block): Dem
 }
 
 export function buyerPickup(state: DemoState, stopId: string, pickupId: string): DemoState {
-  const pp = allPickupPoints.find((p) => p.id === pickupId)!;
+  const pp = riderOfShift(shiftById(state.shiftId)).pickupPoints.find((p) => p.id === pickupId);
+  if (!pendingOrder(state, stopId) || !pp || !Array.isArray(pp.pos) || pp.pos.length !== 2 || !pp.pos.every(Number.isFinite)) return state;
   let s = setBuyer(state, stopId, { kind: "pickup", pickupId, at: new Date().toISOString() });
   s = addMessage(s, stopId, "Buyer", `I will collect it at ${pp.name}.`);
-  s = log(s, { type: "buyer_pickup", role: "buyer", summary: `Buyer of ${stopId} chose ${pp.name}`, output: "Stop moves to the pickup point; success effect not estimated (no data)" });
+  s = log(s, { type: "buyer_pickup", role: "buyer", summary: `Buyer of ${stopId} chose ${pp.name}`, output: "Pickup request stored; dispatched plan changes only after Dispatcher approval. Success effect not estimated (no data)" });
   if (current(state)) s = propose(s, { kind: "buyer_pickup", stopId, pickupName: pp.name });
   return s;
 }
 
 export function buyerNoResponse(state: DemoState, stopId: string): DemoState {
+  if (!pendingOrder(state, stopId)) return state;
+  const response = state.stopStates[state.shiftId][stopId].buyer;
+  if (["confirmed", "changed", "pickup"].includes(response.kind)) return state;
   const prevBuyer = state.stopStates[state.shiftId][stopId].buyer;
   let s = setBuyer(state, stopId, { kind: "no_response", at: new Date().toISOString() });
   s = addMessage(s, stopId, "S-Compass", "No reply received. The order stays in the plan; the rider calls on arrival. (The order is NOT cancelled.)");
@@ -458,8 +484,10 @@ export function buyerNoResponse(state: DemoState, stopId: string): DemoState {
 
 export function reportEntranceClosed(state: DemoState, stopId: string, untilMin: number | null, useAlternate: boolean): DemoState {
   const shift = shiftById(state.shiftId);
-  const stop = shift.stops.find((x) => x.id === stopId)!;
+  const stop = shift.stops.find((x) => x.id === stopId);
+  if (!stop || !pendingOrder(state, stopId) || (untilMin !== null && (!Number.isFinite(untilMin) || untilMin < state.clockMin[state.shiftId]))) return state;
   const card = cardsFor(state)[stop.locationKey];
+  if (useAlternate && !card.alternateEntrance) return state;
   const detail = useAlternate
     ? `use ${card.alternateEntrance ?? "alternate entrance"} instead`
     : untilMin === null
@@ -480,18 +508,109 @@ export function reportOtherIssue(state: DemoState, stopId: string, text: string)
   return log(state, { type: "issue_reported", summary: `Issue at ${stopId}`, input: text, output: "Logged for dispatcher; no automatic plan change" });
 }
 
+/** Replanning safety snapshot excludes event-log noise and the currently selected demo role. */
+function replanInputDigest(state: DemoState): string {
+  return JSON.stringify({ run: comparisonRunIdFor(state), plan: current(state) });
+}
+
+export function proposalAcceptanceBlocker(state: DemoState, p: ReplanProposal): string | null {
+  if (p.status !== "open") return "This proposal has already been decided or superseded.";
+  const active = current(state);
+  if (!active || p.previous.shiftId !== state.shiftId || p.proposed.shiftId !== state.shiftId) return "Select the proposal's dispatched shift before reviewing it.";
+  if (!p.inputDigest) return "Legacy proposal has no safety snapshot. Create a fresh proposal before acceptance.";
+  if (p.inputDigest !== replanInputDigest(state) || JSON.stringify(p.previous) !== JSON.stringify(active)) return "Inputs, completed stops or dispatched plan changed. Create a fresh proposal; the newer state is preserved.";
+  const proposedIds = p.proposed.stops.map((s) => s.stopId);
+  const expectedIds = active.stops.map((s) => s.stopId);
+  if (new Set(proposedIds).size !== proposedIds.length || JSON.stringify([...proposedIds].sort()) !== JSON.stringify([...expectedIds].sort())) return "Proposal contains missing, duplicate or unexpected orders.";
+  const shift = shiftById(state.shiftId);
+  const states = state.stopStates[state.shiftId];
+  const cards = cardsFor(state);
+  const completed = active.stops.filter((s) => ["delivered", "failed"].includes(states[s.stopId]?.status));
+  for (const [i, before] of completed.entries()) {
+    const after = p.proposed.stops[i];
+    if (!after || JSON.stringify({ ...before, seq: 0, fixed: true }) !== JSON.stringify({ ...after, seq: 0 })) return "Proposal would alter completed deliveries.";
+  }
+  for (const stop of p.proposed.stops) {
+    if (states[stop.stopId]?.status !== "pending") continue;
+    if (stop.fixed) return `Pending order ${stop.stopId} must not be marked completed.`;
+    const buyer = states[stop.stopId].buyer;
+    const scheduled = Number.isFinite(stop.arriveMin);
+    if ((buyer.kind === "confirmed" || buyer.kind === "changed") && (!scheduled || stop.block !== buyer.block || stop.arriveMin < blockInfo(buyer.block).start || stop.arriveMin > blockInfo(buyer.block).end)) return `${stop.stopId}: buyer commitment is at risk. Contact the buyer and create a feasible proposal.`;
+    if (buyer.kind === "pickup") {
+      const pp = riderOfShift(shift).pickupPoints.find((p) => p.id === buyer.pickupId);
+      if (!pp || stop.pointSource !== "pickup point" || !stop.point || stop.point[0] !== pp.pos[0] || stop.point[1] !== pp.pos[1]) return `${stop.stopId}: pickup destination is invalid or does not match the request.`;
+      if (stop.p !== null || stop.pModel !== null) return `${stop.stopId}: pickup success has no data and must not have an invented estimate.`;
+    }
+    if (!scheduled) {
+      if (!stop.flags.length) return `${stop.stopId}: unscheduled order needs a visible review warning.`;
+      continue; // Explicitly held orders stay in the plan and require follow-up.
+    }
+    const block = BLOCKS.find((b) => b.id === stop.block);
+    if (!block) return `${stop.stopId}: invalid delivery block.`;
+    if (!Number.isFinite(stop.departMin) || stop.departMin < stop.arriveMin) return `${stop.stopId}: invalid processing/ETA values.`;
+    if (stop.pointSource === "pickup point") continue; // Original site's rules do not apply at a pickup point.
+    const site = shift.stops.find((s) => s.id === stop.stopId)!;
+    const violation = cards[site.locationKey].restrictions.find((r) => r.strength === "hard" && (
+      (r.weekdaysOnly && shift.isWeekend) || (r.blocks && (!r.blocks.includes(stop.block) || !r.blocks.some((b) => stop.arriveMin >= blockInfo(b).start && stop.arriveMin <= blockInfo(b).end))) ||
+      (r.earliestMin !== undefined && stop.arriveMin < r.earliestMin) || (r.latestMin !== undefined && stop.arriveMin > r.latestMin)
+    ));
+    if (violation) return `${stop.stopId}: violates ${violation.text}. Review the site restriction before proceeding.`;
+  }
+  return null;
+}
+
+/** Explain outstanding requests after an operator explicitly keeps the existing route. */
+export function unresolvedReplanWarnings(state: DemoState): string[] {
+  const active = current(state);
+  if (!active || state.proposals.some((p) => p.status === "open" && p.previous.shiftId === state.shiftId) || !state.proposals.some((p) => p.status === "overridden" && p.previous.shiftId === state.shiftId && !/^(Replaced|Superseded) by/.test(p.decisionNote ?? ""))) return [];
+  const shift = shiftById(state.shiftId);
+  const cards = cardsFor(state);
+  return active.stops.flatMap((s) => {
+    const st = state.stopStates[state.shiftId][s.stopId];
+    if (st?.status !== "pending") return [];
+    const buyer = st.buyer;
+    const warnings: string[] = [];
+    if ((buyer.kind === "changed" || buyer.kind === "confirmed") && (!Number.isFinite(s.arriveMin) || s.block !== buyer.block || s.arriveMin > blockInfo(buyer.block).end)) warnings.push(`${s.stopId}: current route does not satisfy the buyer's ${blockLabel(buyer.block)} request. Contact the buyer and review a new plan; the commitment is retained.`);
+    if (buyer.kind === "pickup") {
+      const pp = riderOfShift(shift).pickupPoints.find((p) => p.id === buyer.pickupId);
+      if (!pp || s.pointSource !== "pickup point" || !s.point || s.point[0] !== pp.pos[0] || s.point[1] !== pp.pos[1]) warnings.push(`${s.stopId}: pickup request remains unresolved. Contact the buyer and review a new plan; do not deliver to the old site without agreement.`);
+    }
+    const closure = cards[shift.stops.find((x) => x.id === s.stopId)!.locationKey].temporaryClosure;
+    if (closure && s.pointSource !== "pickup point" && !closure.useAlternate && Number.isFinite(s.arriveMin) && (closure.untilMin === null || s.arriveMin < closure.untilMin)) warnings.push(`${s.stopId}: the current route still uses an unavailable entrance. Stop and contact Dispatcher; review an alternate entrance or a new plan.`);
+    return warnings;
+  });
+}
+
 export function decideProposal(state: DemoState, id: string, accept: boolean, note?: string): DemoState {
   const p = state.proposals.find((x) => x.id === id);
-  if (!p || p.status !== "open") return state;
-  const proposals = state.proposals.map((x) => (x.id === id ? { ...x, status: accept ? ("accepted" as const) : ("overridden" as const), decisionNote: note } : x));
+  if (state.role !== "dispatcher" || !p || p.status !== "open" || p.previous.shiftId !== state.shiftId) return state;
+  if (accept && proposalAcceptanceBlocker(state, p)) return state;
+  if (!accept && !note?.trim()) return state;
+  const proposals = state.proposals.map((x) => x.id === id ? { ...x, status: accept ? "accepted" as const : "overridden" as const, decisionNote: note?.trim(), decidedAt: new Date().toISOString(), decidedBy: "Dispatcher" } : x);
   let s: DemoState = { ...state, proposals };
-  if (accept) s = { ...s, currentPlan: { ...s.currentPlan, [p.proposed.shiftId]: p.proposed } };
+  if (accept) s = { ...s, currentPlan: { ...s.currentPlan, [state.shiftId]: p.proposed } };
   return log(s, {
-    type: accept ? "replan_accepted" : "replan_overridden",
-    summary: `${accept ? "Accepted" : "Overrode"} plan change: ${p.triggerText}`,
-    input: note,
-    output: accept ? describePlan(p.proposed) : "Previous sequence kept",
+    type: accept ? "replan_accepted" : "replan_overridden", role: "dispatcher",
+    summary: `${accept ? "Accepted" : "Kept current plan for"} plan change: ${p.triggerText}`,
+    input: `Proposal ${p.id}; ${note ?? "Dispatcher accepted after current-input and hard-constraint validation"}`,
+    output: accept ? describePlan(p.proposed) : `Previous route kept; buyer requests and closure reports retained. Follow-up: ${unresolvedReplanWarnings(s).join(" | ") || "Review unresolved requests and contact the buyer/rider before continuing."}`,
   });
+}
+
+export type DemoReplanEvent =
+  | { kind: "window"; stopId: string; block: Block }
+  | { kind: "pickup"; stopId: string; pickupId: string }
+  | { kind: "closure"; stopId: string; untilMin: number | null; useAlternate: boolean };
+
+export function simulateReplanScenario(state: DemoState, event: DemoReplanEvent): DemoState {
+  if (!current(state) || !pendingOrder(state, event.stopId)) return state;
+  const asRole: Role = event.kind === "closure" ? "rider" : "buyer";
+  const started = log(state, { type: "demo_scenario_triggered", summary: `SIMULATED ${event.kind} event initiated by demo operator`, input: JSON.stringify({ operatorRole: state.role, simulatedActorRole: asRole, event }), output: "Simulation only; no external message or automatic dispatch" });
+  const demoEventId = started.events.at(-1)!.id;
+  const eventState = { ...started, role: asRole };
+  const result = event.kind === "window" ? buyerChange(eventState, event.stopId, event.block) : event.kind === "pickup" ? buyerPickup(eventState, event.stopId, event.pickupId) : reportEntranceClosed(eventState, event.stopId, event.untilMin, event.useAlternate);
+  if (result === eventState) return state; // Discard the tentative log; invalid input is not a successful scenario.
+  return { ...result, role: state.role, proposals: result.proposals.map((p) => !state.proposals.some((old) => old.id === p.id) ? { ...p, demoEventId } : p) };
 }
 
 export function recordOutcome(state: DemoState, stopId: string, outcome: "delivered" | "failed", reason?: string): DemoState {

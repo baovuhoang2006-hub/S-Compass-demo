@@ -3,6 +3,7 @@
 import { ArrowLeftRight, BarChart3, Info, Send, Sparkles, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
+import { PlanFollowUp } from "@/components/ProposalReview";
 import { BlockTag, CardStatusBadge, ChanceText, EmptyState, MethodBadge, SourceTag, Stat, TYPE_LABEL } from "@/components/bits";
 import { RouteMap } from "@/components/RouteMap";
 import { ShiftRibbon } from "@/components/ShiftRibbon";
@@ -218,6 +219,7 @@ export default function DispatcherPage() {
         </details>
       </div>
 
+      <PlanFollowUp />
       {openProposal || pendingCorrections.length ? (
         <div className="flex flex-wrap gap-3">
           {openProposal ? (

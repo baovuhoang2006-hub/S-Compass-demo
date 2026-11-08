@@ -36,6 +36,8 @@ export const EVENT_TYPES: Record<string, string> = {
   buyer_pickup: "Buyer chose pickup",
   buyer_no_response: "Buyer did not respond",
   issue_reported: "Issue reported",
+  demo_scenario_triggered: "Simulated event initiated by demo operator",
+  replan_superseded: "Pending proposal superseded",
   replan_proposed: "Replan proposed",
   replan_accepted: "Replan accepted",
   replan_overridden: "Replan overridden",
