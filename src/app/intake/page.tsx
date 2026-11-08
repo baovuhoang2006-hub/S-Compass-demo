@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, FileSpreadsheet, FlaskConical, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, FlaskConical, ShieldAlert, ShieldCheck, Trash2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { Stat } from "@/components/bits";
@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { activeImportBatch, saveImportedLocal, setImported } from "@/lib/data";
-import { recordImport, recordImportRemoved, selectShift } from "@/lib/demoState";
+import { log, recordImport, recordImportRemoved, selectShift } from "@/lib/demoState";
 import { importUseReason } from "@/lib/importSafety";
+import { screenImport, type RiskCase, type ScreenResult } from "@/lib/importRisk";
 import { FAR_PIN_METERS, HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, templateRows, toCsvText, type ImportBatch, type RowStatus } from "@/lib/intake";
 import { downloadText } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
@@ -78,8 +79,23 @@ export default function IntakePage() {
   const [filter, setFilter] = React.useState<RowStatus | "issues">("issues");
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [requirementsOpen, setRequirementsOpen] = React.useState(false);
+  const [riskRecorded, setRiskRecorded] = React.useState(false);
+
+  // Reset demo (from any page) clears the global import store and sets a new session id.
+  // This page keeps its own local copy of the checked/imported batch, so re-sync it here —
+  // otherwise Reset appears to do nothing until the user navigates away and back.
+  React.useEffect(() => {
+    const active = activeImportBatch();
+    setBatch(active);
+    setIsActive(active !== null);
+    setError(null);
+    setNote(null);
+    setRiskRecorded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.sessionId]);
 
   const check = (rows: unknown[][], fileName: string, sheet: string | null) => {
+    setRiskRecorded(false);
     const t0 = performance.now();
     const res = parseTable(rows, fileName, sheet);
     const ms = Math.round(performance.now() - t0);
@@ -113,6 +129,11 @@ export default function IntakePage() {
 
   const doImport = () => {
     if (!batch) return;
+    const sc = screenImport(batch);
+    if (sc.status === "blocked") {
+      setNote("This file was stopped by risk screening and cannot be imported. Record the incident in Evidence instead.");
+      return;
+    }
     const previousBatch = activeImportBatch();
     const lockReason = previousBatch ? importUseReason(state, previousBatch) : null;
     if (lockReason) {
@@ -125,14 +146,39 @@ export default function IntakePage() {
     update((st) => {
       const selectedOldImport = previousBatch?.shifts.some((shift) => shift.id === st.shiftId) ?? false;
       const next = selectedOldImport && batch.shifts[0] ? selectShift(st, batch.shifts[0].id) : st;
-      return recordImport(
+      const imported = recordImport(
         next,
         `Imported ${batch.fileName}: ${s.riderDays} rider-days`,
         `${s.rowsRead} rows read · ${s.accepted} accepted · ${s.warning} with warning · ${s.quarantined} quarantined · ${s.notProcessed} not processed · ${s.heavyDays} heavy days`,
       );
+      return log(imported, {
+        type: "import_risk_passed",
+        role: "dispatcher",
+        summary: `${sc.incidentId}: screening passed — safe to import`,
+        input: batch.fileName,
+        output: sc.okReason,
+      });
     });
     setIsActive(true);
     setNote(warn ?? `Imported. ${s.riderDays} rider-days are now in the Dispatcher’s rider list, marked “Imported”. Quarantined rows are not planned.`);
+  };
+
+  const recordRiskIncident = () => {
+    if (!batch) return;
+    const sc = screenImport(batch);
+    if (sc.status !== "blocked") return;
+    const hit = sc.cases.filter((c) => c.triggered);
+    update((st) =>
+      log(st, {
+        type: "import_risk_blocked",
+        role: "dispatcher",
+        summary: `${sc.incidentId}: ${hit.map((c) => c.label).join(", ")} — import stopped`,
+        input: `${batch.fileName} · ${batch.summary.rowsRead} rows`,
+        output: hit.map((c) => `${c.label}: ${c.detail}`).join(" | "),
+      }),
+    );
+    setRiskRecorded(true);
+    setNote("Risk incident recorded in Evidence. Nothing was imported; the current plans are unchanged.");
   };
 
   const open = (shiftId: string) => {
@@ -156,6 +202,7 @@ export default function IntakePage() {
   };
 
   const s = batch?.summary;
+  const screen = batch ? screenImport(batch) : null;
   const currentBatch = activeImportBatch();
   const importLock = currentBatch ? importUseReason(state, currentBatch) : null;
   const order: Record<RowStatus, number> = { quarantined: 0, warning: 1, accepted: 2 };
@@ -208,6 +255,7 @@ export default function IntakePage() {
 
       {batch && s ? (
         <>
+          {screen ? <RiskScreen screen={screen} recorded={riskRecorded} onRecord={recordRiskIncident} /> : null}
           <Panel>
             <PanelHeader
               title={`Check results · ${batch.fileName}${batch.sheet ? ` (sheet “${batch.sheet}”)` : ""}`}
@@ -215,6 +263,8 @@ export default function IntakePage() {
               actions={
                 isActive ? (
                   <Badge tone="ok">Imported — Available in Dispatcher</Badge>
+                ) : screen?.status === "blocked" ? (
+                  <Badge tone="bad">Import stopped — see risk screening</Badge>
                 ) : (
                   <Button variant="primary" size="sm" onClick={doImport} disabled={s.riderDays === 0 || !!importLock}>
                     {currentBatch ? "Replace with" : "Import"} {s.riderDays} rider-day{s.riderDays === 1 ? "" : "s"}
@@ -345,6 +395,41 @@ export default function IntakePage() {
         <p className="mt-4 text-xs text-ink-soft">Session: {state.sessionId.slice(-6)} · Import and removal actions are recorded in Evidence.</p>
       </details></Panel>
     </div>
+  );
+}
+
+function RiskScreen({ screen, recorded, onRecord }: { screen: ScreenResult; recorded: boolean; onRecord: () => void }) {
+  const blocked = screen.status === "blocked";
+  const primaryLabel = screen.cases.find((c) => c.kind === screen.primary)?.label;
+  return (
+    <Panel aria-label="Import risk screening">
+      <div className={`flex flex-wrap items-start gap-3 border-b border-line px-5 py-4 ${blocked ? "bg-bad-tint" : "bg-ok-tint"}`}>
+        {blocked ? <ShieldAlert aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-bad" /> : <ShieldCheck aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-ok" />}
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold">{blocked ? `Import stopped — ${primaryLabel}` : "Screening passed — safe to import"}</h2>
+          <p className="mt-1 text-sm text-ink-soft">{blocked ? "This file falls into a risk case, so it is not imported. Record the incident in Evidence, fix the source file, then check again." : screen.okReason}</p>
+          <p className="mt-1 text-xs text-ink-faint">Incident {screen.incidentId} · deterministic demo screening, not a learned model</p>
+        </div>
+        {blocked ? (
+          <Button size="sm" variant={recorded ? "outline" : "danger"} onClick={onRecord} disabled={recorded}>
+            <FileText /> {recorded ? "Recorded in Evidence" : "Record incident in Evidence"}
+          </Button>
+        ) : null}
+      </div>
+      <div className="grid gap-3 px-5 py-4 sm:grid-cols-3">
+        {screen.cases.map((c) => (
+          <div key={c.kind} className={`rounded-lg border p-3 ${c.triggered ? "border-bad/30 bg-bad-tint" : "border-line"}`}>
+            <div className="flex flex-wrap items-center gap-2">
+              {c.triggered ? <AlertTriangle aria-hidden="true" className="size-4 text-bad" /> : <CheckCircle2 aria-hidden="true" className="size-4 text-ok" />}
+              <h3 className="text-sm font-semibold">{c.label}</h3>
+              <Badge tone={c.triggered ? "bad" : "ok"}>{c.triggered ? "Risk found" : "Clear"}</Badge>
+            </div>
+            <p className="mt-1.5 text-sm text-ink-soft">{c.reason}</p>
+            <p className="mt-1 text-xs text-ink-faint">{c.detail}</p>
+          </div>
+        ))}
+      </div>
+    </Panel>
   );
 }
 

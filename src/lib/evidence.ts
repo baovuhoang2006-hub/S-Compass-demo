@@ -17,6 +17,8 @@ export interface EvidenceEvent {
 export const EVENT_TYPES: Record<string, string> = {
   data_imported: "Data imported",
   data_import_removed: "Imported data removed",
+  import_risk_passed: "Import risk screening passed",
+  import_risk_blocked: "Import stopped by risk screening",
   plan_generated: "Plan generated",
   plans_compared: "Plans compared",
   plan_dispatched: "Plan dispatched to rider",
