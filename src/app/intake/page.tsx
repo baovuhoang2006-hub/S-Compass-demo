@@ -401,7 +401,7 @@ function RiskScreen({ screen, recorded, onRecord }: { screen: ScreenResult; reco
       <div className={`flex flex-wrap items-start gap-3 border-b border-line px-5 py-4 ${blocked ? "bg-bad-tint" : "bg-ok-tint"}`}>
         {blocked ? <ShieldAlert aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-bad" /> : <ShieldCheck aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-ok" />}
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold">{blocked ? `Import stopped — ${primaryLabel}` : screen.status === "warning" ? "Screening passed with warnings — eligible rows only" : "Screening passed — safe to import"}</h2>
+          <h2 className="text-base font-semibold">{blocked ? `Import stopped — ${primaryLabel}` : "Screening passed — safe to import"}</h2>
           <p className="mt-1 text-sm text-ink-soft">{blocked ? "This file falls into a risk case, so it is not imported. Record the incident in Evidence, fix the source file, then check again." : screen.okReason}</p>
           <p className="mt-1 text-xs text-ink-faint">Incident {screen.incidentId} · deterministic demo screening, not a learned model</p>
         </div>
