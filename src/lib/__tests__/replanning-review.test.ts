@@ -67,11 +67,11 @@ describe("replanning review guards", () => {
     expect(decideProposal(advanced, p.id, true)).toBe(advanced);
   });
 
-  it("a newer dispatched plan supersedes the pending proposal without recording a rejection", () => {
+  it("dispatch cannot silently supersede a pending proposal; Dispatcher must decide it first", () => {
     let s = setup(); s = buyerPickup(s, first(s), pickup(s).id); const p = pending(s);
-    s = generatePlan(s, "rules"); s = dispatchPlan(s, s.draftPlan!);
-    expect(s.proposals.find((x) => x.id === p.id)?.status).toBe("superseded");
-    expect(decideProposal(s, p.id, true)).toBe(s);
+    s = generatePlan(s, "rules");
+    expect(dispatchPlan(s, s.draftPlan!)).toBe(s);
+    expect(s.proposals.find((x) => x.id === p.id)?.status).toBe("open");
     expect(metrics(s.events).replansOverridden).toBe(0);
   });
 
