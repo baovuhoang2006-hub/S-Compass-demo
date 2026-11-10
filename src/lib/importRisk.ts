@@ -7,7 +7,7 @@
 import { HEAVY_DAY_PARCELS, MAX_ROWS, type ImportBatch } from "./intake";
 
 export type RiskKind = "overload" | "ai" | "data";
-export type ScreenStatus = "ok" | "blocked";
+export type ScreenStatus = "ok" | "warning" | "blocked";
 
 export interface RiskCase {
   kind: RiskKind;
@@ -77,9 +77,9 @@ export function screenImport(batch: ImportBatch): ScreenResult {
     label: LABEL.ai,
     triggered: aiHit,
     reason: aiHit
-      ? "Most orders have no map pin or are repeat attempts, so the success estimate would be unreliable."
-      : "Enough orders have a pin and a first-attempt history for a usable estimate.",
-    detail: `${pct(lowInfo, nEligible)}% of ${nEligible.toLocaleString()} eligible orders lack a pin or are repeat attempts (limit ${Math.round(AI_LOWINFO_SHARE * 100)}%).`,
+      ? "Many orders lack a pin or are repeat attempts. Import is blocked before planning; no AI inference was run."
+      : "Input completeness is within the demo limit. AI inference has not run at upload.",
+    detail: `${pct(lowInfo, nEligible)}% of ${nEligible.toLocaleString()} eligible orders lack a pin or are repeat attempts (limit ${Math.round(AI_LOWINFO_SHARE * 100)}%). This is an input check, not a prediction.`,
   };
 
   // C — Anomalous data: too many rows had to be quarantined or fixed by a fallback.
@@ -98,7 +98,7 @@ export function screenImport(batch: ImportBatch): ScreenResult {
 
   const cases = [overload, ai, data];
   const triggered = cases.filter((c) => c.triggered);
-  const status: ScreenStatus = triggered.length > 0 ? "blocked" : "ok";
+  const status: ScreenStatus = triggered.length > 0 ? "blocked" : s.warning || s.quarantined ? "warning" : "ok";
   const primary = triggered[0]?.kind ?? null;
 
   const okReason =

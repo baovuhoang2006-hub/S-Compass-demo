@@ -86,6 +86,13 @@ export function saveImportedLocal(batch: ImportBatch | null): string | null {
   try { if (batch) localStorage.setItem(IMPORT_KEY, JSON.stringify(batch)); else localStorage.removeItem(IMPORT_KEY); return null; }
   catch { return "Import could not be saved for reload in this browser; it remains active until this tab closes."; }
 }
+/** Commit storage before replacing the live dataset so a failed write leaves plans untouched. */
+export function commitImportedBatch(batch: ImportBatch | null): string | null {
+  const problem = saveImportedLocal(batch);
+  if (problem) return problem;
+  setImported(batch);
+  return null;
+}
 export function loadImportedLocal(): ImportBatch | null {
   try { const raw = localStorage.getItem(IMPORT_KEY); return raw ? JSON.parse(raw) as ImportBatch : null; } catch { return null; }
 }

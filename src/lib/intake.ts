@@ -54,6 +54,23 @@ export type IntakeResult = { ok: true; batch: ImportBatch } | { ok: false; error
 export const MAX_ROWS = 10000;
 export const HEAVY_DAY_PARCELS = 40;
 export const FAR_PIN_METERS = 300;
+// Technical parser limits, not delivery-capacity or model-performance assumptions.
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_SHEETS = 20;
+export const MAX_COLUMNS = 256;
+export function uploadProblem(name: string, size: number): string | null {
+  if (!size) return "Case C — Anomalous data: the file is empty. Rows and AI inference were not checked.";
+  if (size > MAX_UPLOAD_BYTES) return `Case A — System overload: file exceeds the ${MAX_UPLOAD_BYTES / 1024 / 1024} MiB parser limit. No rows were imported.`;
+  if (!/\.(csv|txt|xlsx)$/i.test(name)) return "Case C — Anomalous data: only CSV and .xlsx delivery files can be checked.";
+  return null;
+}
+
+export function selectDeliverySheet(sheets: { sheet: string; data: unknown[][] }[], fileName: string): { rows: unknown[][]; sheet: string } {
+  if (sheets.length > MAX_SHEETS) throw new Error(`Case A — System overload: workbook has more than ${MAX_SHEETS} sheets. No rows were imported.`);
+  const candidates = sheets.filter(s => parseTable(s.data, fileName, s.sheet).ok);
+  if (candidates.length !== 1) throw new Error(candidates.length ? "Case C — Anomalous data: multiple worksheets contain delivery orders; choose one sheet in the source workbook." : "Case C — Anomalous data: no worksheet contains an unambiguous delivery table.");
+  return { rows: candidates[0].data, sheet: candidates[0].sheet };
+}
 // Broad box around Ho Chi Minh City (incl. Thu Duc, Binh Chanh, Cu Chi, Nha Be).
 const HCMC = { latMin: 10.3, latMax: 11.2, lonMin: 106.3, lonMax: 107.1 };
 
@@ -159,9 +176,9 @@ export function parseDate(v: unknown): string | null {
   else if (typeof v === "number" && v > 20000 && v < 80000) d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000);
   else {
     const s = String(v).trim();
-    let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+    let m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?$/);
     if (m) d = mk(+m[1], +m[2], +m[3]);
-    else if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) d = mk(+m[3], +m[2], +m[1]); // dd/mm/yyyy (Vietnam)
+    else if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/)) && (+m[1] > 12 || +m[2] > 12)) d = mk(+m[3], +m[2], +m[1]); // unambiguous dd/mm/yyyy
   }
   if (!d || Number.isNaN(d.getTime())) return null;
   const y = d.getUTCFullYear();
@@ -239,11 +256,24 @@ interface Draft {
 }
 
 export function parseTable(rows: unknown[][], fileName: string, sheet: string | null = null, now = new Date()): IntakeResult {
+  if (!Array.isArray(rows)) return { ok: false, error: "Unreadable delivery table.", foundColumns: [] };
   const nonEmpty = rows.filter((r) => Array.isArray(r) && r.some((c) => str(c) !== ""));
   if (nonEmpty.length === 0) return { ok: false, error: "The file is empty.", foundColumns: [] };
   const { index, map } = findHeader(nonEmpty);
   const header = nonEmpty[index] ?? [];
   const foundColumns = header.map(str).filter(Boolean);
+  if (nonEmpty.some(r => r.length > MAX_COLUMNS)) return { ok: false, error: `Too many columns (limit ${MAX_COLUMNS}); no rows were imported.`, foundColumns };
+  const seenHeaders = new Set<string>();
+  for (const value of header) {
+    const normalized = normHeader(value);
+    if (!normalized) continue;
+    if (seenHeaders.has(normalized)) return { ok: false, error: `Duplicate column title “${str(value)}”; correct the source file.`, foundColumns };
+    seenHeaders.add(normalized);
+  }
+  for (const [field, aliases] of Object.entries(ALIASES)) {
+    if (header.filter(value => aliases.includes(normHeader(value))).length > 1)
+      return { ok: false, error: `Multiple columns map to ${field}; select one source column.`, foundColumns };
+  }
   const missing: string[] = [];
   if (map.order_id === undefined) missing.push("order_id (required for duplicate detection and repeatable import)");
   if (map.rider_id === undefined) missing.push("rider_id (required to assign imported parcels safely)");
@@ -258,6 +288,8 @@ export function parseTable(rows: unknown[][], fileName: string, sheet: string | 
 
   const fileNotes: string[] = [];
   const body = nonEmpty.slice(index + 1);
+  if (!body.length) return { ok: false, error: "No delivery orders found after the header.", foundColumns };
+  if (body.some(r => r.slice(header.length).some(c => str(c) !== ""))) return { ok: false, error: "A data row has values beyond the header columns; correct the file structure.", foundColumns };
   const notProcessed = Math.max(0, body.length - MAX_ROWS);
   if (notProcessed) fileNotes.push(`The file has ${body.length.toLocaleString()} data rows. One batch takes up to ${MAX_ROWS.toLocaleString()}; the last ${notProcessed.toLocaleString()} rows were not processed. Split the file and import the rest separately.`);
   if (map.order_id === undefined) fileNotes.push("No order ID column: each row was given a row-number ID.");
@@ -275,7 +307,10 @@ export function parseTable(rows: unknown[][], fileName: string, sheet: string | 
     const issues: string[] = [];
     let quarantine = false;
 
-    const orderId = str(cell(r, "order_id")) || `row-${rowNo}`;
+    const rawOrder = cell(r, "order_id");
+    const orderId = str(rawOrder);
+    if (!orderId) { quarantine = true; issues.push("Missing order ID: stable duplicate detection is impossible"); }
+    else if (typeof rawOrder === "number" || /\d[eE][+-]?\d/.test(orderId)) { quarantine = true; issues.push("Order ID may have lost leading zeroes or been converted to scientific notation by Excel"); }
     let riderId = map.rider_id === undefined ? "IMPORTED" : str(cell(r, "rider_id"));
     if (!riderId) {
       quarantine = true;
@@ -300,12 +335,12 @@ export function parseTable(rows: unknown[][], fileName: string, sheet: string | 
     const rawPay = str(cell(r, "payment"));
     let payment: Payment = PAY_MAP[normHeader(rawPay)] ?? "cod";
     if (map.payment !== undefined && !rawPay) issues.push("Payment missing: treated as COD (safer)");
-    else if (rawPay && !PAY_MAP[normHeader(rawPay)]) issues.push(`Unknown payment “${rawPay}”: treated as COD (safer)`);
+    else if (rawPay && !PAY_MAP[normHeader(rawPay)]) { quarantine = true; issues.push(`Unknown payment “${rawPay}”: cannot safely infer COD or prepaid`); }
     if (map.payment === undefined) payment = "cod";
 
     const rawParcel = str(cell(r, "parcel"));
     const parcel: Parcel = PARCEL_MAP[normHeader(rawParcel)] ?? "standard";
-    if (rawParcel && !PARCEL_MAP[normHeader(rawParcel)]) issues.push(`Unknown parcel type “${rawParcel}”: treated as standard`);
+    if (rawParcel && !PARCEL_MAP[normHeader(rawParcel)]) { quarantine = true; issues.push(`Unknown parcel type “${rawParcel}”: cannot safely infer package handling`); }
 
     let latlon: [number, number] | null = null;
     const la = parseNum(cell(r, "lat"));
@@ -322,17 +357,23 @@ export function parseTable(rows: unknown[][], fileName: string, sheet: string | 
     } else issues.push(`Pin outside Ho Chi Minh City (${la}, ${lo}): ignored as anomalous, buyer will be asked`);
 
     let serviceMin = parseNum(cell(r, "service_min"));
+    if (str(cell(r, "service_min")) && serviceMin === null) issues.push("Unreadable handover time: ignored, the planner uses its existing fallback");
     if (serviceMin !== null && (serviceMin < 0 || serviceMin > 120)) {
       issues.push(`Handover time ${serviceMin} min is impossible: ignored, the planner uses its default`);
       serviceMin = null;
     }
 
     const attemptNo = parseNum(cell(r, "attempt_no"));
+    if (str(cell(r, "attempt_no")) && (attemptNo === null || !Number.isInteger(attemptNo) || attemptNo < 1)) { quarantine = true; issues.push("Invalid attempt number"); }
     const rf = str(cell(r, "is_reattempt"));
+    if (rf && !DELIVERED.has(normHeader(rf)) && !["0", "false", "no", "khong"].includes(normHeader(rf))) { quarantine = true; issues.push(`Invalid reattempt flag “${rf}”`); }
     const reattemptFlag = rf ? DELIVERED.has(normHeader(rf)) : null;
     const st = str(cell(r, "status"));
-    const delivered = map.status === undefined ? null : DELIVERED.has(normHeader(st));
-    const window = BLOCK_MAP[normHeader(str(cell(r, "window")))] ?? null;
+    if (st && !DELIVERED.has(normHeader(st)) && !["failed", "failure", "unsuccessful", "not_delivered", "0", "false", "no"].includes(normHeader(st))) { quarantine = true; issues.push(`Unknown delivery status “${st}”`); }
+    const delivered = map.status === undefined || !st ? null : DELIVERED.has(normHeader(st));
+    const rawWindow = str(cell(r, "window"));
+    const window = BLOCK_MAP[normHeader(rawWindow)] ?? null;
+    if (rawWindow && !window) { quarantine = true; issues.push(`Invalid receiving window “${rawWindow}”`); }
 
     const placeId = str(cell(r, "location_id"));
     const placeName = str(cell(r, "location_name"));
@@ -347,6 +388,14 @@ export function parseTable(rows: unknown[][], fileName: string, sheet: string | 
     const result: RowResult = { row: rowNo, orderId, riderId, date: date ?? str(rawDate), status: quarantine ? "quarantined" : issues.length ? "warning" : "accepted", issues };
     drafts.push({ row: rowNo, orderId, riderId, date, type, placeKey, placeName: placeName || placeId, payment, parcel, latlon, serviceMin, attemptNo, reattemptFlag, delivered, window, result });
   });
+
+  // Conflicting site classifications cannot safely inherit the first row's Stop Card.
+  const siteTypes = new Map<string, Set<LocationType>>();
+  for (const d of drafts) if (d.type && d.result.status !== "quarantined") siteTypes.set(d.placeKey, (siteTypes.get(d.placeKey) ?? new Set()).add(d.type));
+  for (const d of drafts) if (siteTypes.get(d.placeKey)?.size && siteTypes.get(d.placeKey)!.size > 1) {
+    d.result.status = "quarantined";
+    d.result.issues.push("Conflicting place types for the same Stop Card; dispatcher must verify the site");
+  }
 
   // Duplicate order on the same day → quarantine the later copy. Same order on an earlier day → this is a re-attempt.
   const firstSeen = new Map<string, Draft>();
@@ -566,6 +615,7 @@ export function parseCsv(text: string): string[][] {
       f = "";
     } else f += c;
   }
+  if (q) throw new Error("CSV has an unterminated quoted value; no rows were imported.");
   if (f !== "" || row.length) {
     row.push(f);
     rows.push(row);
