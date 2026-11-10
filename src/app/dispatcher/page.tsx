@@ -13,7 +13,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Label, Textarea } from "@/components/ui/field";
 import { Panel, PanelHeader } from "@/components/ui/panel";
 import { BACKUP_RIDER, fixtures, historical, riderOfShift } from "@/lib/data";
-import { comparePlans, comparisonRunIdFor, dispatchPlan, generatePlan, selectRider, selectShift, transferParcel } from "@/lib/demoState";
+import { comparePlans, comparisonRunIdFor, dispatchPlan, draftDispatchBlocker, generateBestProposedPlan, planningInputSignature, useComparedDraft, selectRider, selectShift, transferParcel } from "@/lib/demoState";
 import { metrics } from "@/lib/evidence";
 import { onRoadMinutesPerParcel } from "@/lib/kpi";
 import { METHOD_LABEL } from "@/lib/planner";
@@ -72,17 +72,11 @@ export default function DispatcherPage() {
   const m = metrics(state.events);
   const pendingCorrections = state.corrections.filter((c) => c.status === "pending");
   const openProposal = state.proposals.find((p) => p.status === "open" && p.previous.shiftId === shift.id);
-  const staleBuyerStops = draft ? draft.stops.filter((ps) => {
-    const buyer = states[ps.stopId]?.buyer;
-    return (buyer?.kind === "confirmed" || buyer?.kind === "changed") && buyer.block !== ps.block;
-  }) : [];
-  const dispatchBlockReason = openProposal
-    ? "A replanning proposal is waiting. Review it in Replanning before dispatch."
-    : staleBuyerStops.length
-      ? `The draft does not reflect the buyer-confirmed window for ${staleBuyerStops.map((s) => s.stopId).join(", ")}. Generate a new plan.`
-      : null;
-  const generateProposedPlan = () => update((s) => comparePlans(generatePlan(s, "rules")));
-  const comparisonCurrent = state.comparisonMeta?.runId === comparisonRunIdFor(state);
+  const dispatchBlockReason = draft ? draftDispatchBlocker(state, draft) : null;
+  const generateProposedPlan = () => update(generateBestProposedPlan);
+  const comparisonCurrent = state.comparisonMeta?.runId === comparisonRunIdFor(state) && state.comparisonMeta?.safetyRunId === planningInputSignature(state);
+  const selection = state.planSelection?.shiftId === shift.id ? state.planSelection : null;
+  const selectionCurrent = selection?.inputSignature === planningInputSignature(state);
   const baselinePlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "baseline") : undefined;
   const rulesPlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "rules") : undefined;
   const comparisonReady = !!(baselinePlan && rulesPlan && state.comparisonMeta);
@@ -166,7 +160,7 @@ export default function DispatcherPage() {
           </div>
         </div>
         <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">
-          Default: Rules-based · Experimental Model available in detailed comparison · Drafts require dispatcher review.
+          Automatic: compare Baseline, Rules-based and experimental Model on the same inputs. Select the best eligible draft; dispatch remains a separate Dispatcher action.
         </p>
       </Panel>
 
@@ -174,7 +168,7 @@ export default function DispatcherPage() {
 
       {/* Main view keeps operational decisions prominent; reference and session detail stay available below. */}
       <div className="grid gap-4 lg:grid-cols-2">
-        <Panel>
+        <Panel aria-label="Current plan summary" data-plan-method={shown?.method}>
                 <PanelHeader
             title={shown ? (draft ? "Draft plan" : "Dispatched plan") : "No plan yet"}
             note={shown ? `${METHOD_LABEL[shown.method]} · Simulated estimate` : "Generate a proposed plan to see the schedule"}
@@ -191,6 +185,17 @@ export default function DispatcherPage() {
           ) : (
             <p className="px-4 py-6 text-sm text-ink-faint">No draft or dispatched plan yet.</p>
           )}
+          {selection ? <div className="space-y-2 border-t border-line px-4 py-3" aria-label="Automatic planner selection">
+            {!selectionCurrent ? <p role="status" className="text-sm text-warn">Selection is out of date. Inputs changed; generate a new proposed plan before dispatch.</p> : <>
+              <p className="text-sm font-semibold">{selection.selectedMethod ? draft && draft.id !== selection.selectedPlanId ? `Manual draft: ${METHOD_LABEL[draft.method]}. Automatic recommendation: ${METHOD_LABEL[selection.selectedMethod]}.` : `Automatically selected: ${METHOD_LABEL[selection.selectedMethod]}` : "Dispatcher review required — no automatic draft"}</p>
+              <p className="text-sm text-ink-soft">{selection.reason}</p>
+              {selection.experimentalWarning ? <p className="text-xs text-warn">{selection.experimentalWarning}</p> : null}
+            </>}
+            <details><summary className="cursor-pointer text-sm font-medium">Selection details &amp; safety checks</summary><div className="mt-2 space-y-3">
+              <p className="break-words text-xs text-ink-faint">Run: {selection.runId} · {selection.scenarioId}. All estimates use the common history-table sample; model predictions are separate.</p>
+              {selection.evaluations.map(e => <div key={e.method} className="rounded-lg border border-line p-3 text-sm"><p className="font-semibold">{METHOD_LABEL[e.method]} · {e.eligible ? "Eligible" : "Not eligible for automatic selection"}</p><p>Expected first attempts: {e.expectedSuccess?.toFixed(1) ?? "Invalid"} / {e.eligibleStopIds.length} · Minutes/parcel: {e.minutesPerParcel?.toFixed(1) ?? "Not comparable"}</p>{e.errors.map(error => <p key={error} className="mt-1 text-bad">{error}</p>)}{e.warnings.map(warning => <p key={warning} className="mt-1 text-warn">Warning: {warning}</p>)}</div>)}
+            </div></details>
+          </div> : null}
           <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Source: de-identified delivery history · Method: {shown ? METHOD_LABEL[shown.method] : "not run"}.</p>
         </Panel>
         <Panel>
@@ -574,7 +579,7 @@ function ComparisonDetails() {
                     <td className="py-3 pr-3 text-ink-faint">Use as draft</td>
                     {plans.map((p) => (
                       <td key={p.method} className="py-3 pr-3">
-                          <Button size="sm" aria-pressed={state.draftPlan?.id === p.id} variant={p.method === "rules" ? "primary" : "outline"} onClick={() => update((s) => ({ ...s, method: p.method, draftPlan: p }))}>
+                          <Button size="sm" aria-pressed={state.draftPlan?.id === p.id} variant={state.draftPlan?.id === p.id ? "primary" : "outline"} onClick={() => update((s) => useComparedDraft(s, p.id))}>
                             Use {p.method === "model" ? "model" : p.method}
                           </Button>
                       </td>

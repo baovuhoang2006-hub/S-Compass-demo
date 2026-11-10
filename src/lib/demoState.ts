@@ -1,7 +1,8 @@
 import { BACKUP_RIDER, fixtures, riderById, riderOfShift, shiftById } from "./data";
 import type { EvidenceEvent, Role } from "./evidence";
 import { applyCorrection, buildCard, knowledgeSnapshot, reviewValue, RESTRICTION_PRESETS, type CardOverlay, type Correction, type CorrectionField, type OutcomeRecord } from "./knowledge";
-import { makePlan } from "./planner";
+import { makePlan, type PlanContext } from "./planner";
+import { evaluateComparedPlans, planSafetyErrors, type PlanSelection } from "./planSelection";
 import { compareRemaining, type ReplanProposal, type ReplanTrigger } from "./replan";
 import { BLOCKS, SHIFT_START, blockInfo, blockLabel, fmt } from "./time";
 import type { Block, ComparisonMetadata, Plan, PlanMethod, PlannedStop, Point, StopCard, StopState, WindowRestriction } from "./types";
@@ -34,6 +35,8 @@ export interface DemoState {
   outcomes: OutcomeRecord[];
   stopStates: Record<string, Record<string, StopState>>;
   draftPlan: Plan | null;
+  draftContext?: { input: string; plan: string };
+  planSelection?: PlanSelection | null;
   comparison: Plan[] | null;
   comparisonMeta: ComparisonMetadata | null;
   currentPlan: Record<string, Plan | null>;
@@ -138,20 +141,23 @@ export function riderPosition(state: DemoState): { point: Point; min: number } {
   return { point, min: state.clockMin[state.shiftId] };
 }
 
-export function planFor(state: DemoState, method: PlanMethod): Plan {
+function planningContextFor(state: DemoState): Omit<PlanContext, "method"> {
   const shift = shiftById(state.shiftId);
   const pos = riderPosition(state);
   const started = !!current(state);
-  return makePlan({
+  return {
     shift,
-    method,
     cards: cardsFor(state),
     stopStates: state.stopStates[state.shiftId],
     startMin: started ? pos.min : SHIFT_START,
     startPoint: started ? pos.point : riderOfShift(shift).hub.pos,
     previous: current(state),
     sessionOutcomes: state.outcomes,
-  });
+  };
+}
+
+export function planFor(state: DemoState, method: PlanMethod): Plan {
+  return makePlan({ ...planningContextFor(state), method });
 }
 
 /** Stable identifier for the inputs used by a KPI comparison, excluding draft plans and event-log noise. */
@@ -170,6 +176,15 @@ export function comparisonRunIdFor(state: DemoState): string {
   for (let i = 0; i < snapshot.length; i++) hash = Math.imul(hash ^ snapshot.charCodeAt(i), 16777619);
   const fingerprint = (hash >>> 0).toString(16).padStart(8, "0");
   return `compare-${shift.id}-${fingerprint}`;
+}
+
+/** Includes safety context omitted from the business-KPI fingerprint. Excludes draft/event/role noise. */
+export function planningInputSignature(state: DemoState): string {
+  return JSON.stringify({
+    run: comparisonRunIdFor(state), current: current(state),
+    rider: riderOfShift(shiftById(state.shiftId)),
+    pendingProposals: state.proposals.filter(p => p.status === "open" && p.previous.shiftId === state.shiftId).map(p => p.id),
+  });
 }
 
 function describePlan(p: Plan) {
@@ -199,7 +214,7 @@ export function ensureShiftState(state: DemoState, shiftId: string): DemoState {
 }
 
 export function selectShift(state: DemoState, shiftId: string): DemoState {
-  const s = { ...ensureShiftState(state, shiftId), shiftId, draftPlan: null, comparison: null, comparisonMeta: null };
+  const s = { ...ensureShiftState(state, shiftId), shiftId, draftPlan: null, draftContext: undefined, planSelection: null, comparison: null, comparisonMeta: null };
   return log(s, { type: "shift_selected", summary: `Selected ${riderLabel(shiftId)}, ${shiftById(shiftId).weekday} ${shiftById(shiftId).date} shift` });
 }
 
@@ -215,6 +230,8 @@ export function recordImportRemoved(state: DemoState): DemoState {
     currentPlan: Object.fromEntries(Object.entries(state.currentPlan).filter(([id]) => !id.startsWith("imp-"))),
     clockMin: Object.fromEntries(Object.entries(state.clockMin).filter(([id]) => !id.startsWith("imp-"))),
     draftPlan: state.draftPlan?.shiftId.startsWith("imp-") ? null : state.draftPlan,
+    draftContext: state.draftPlan?.shiftId.startsWith("imp-") ? undefined : state.draftContext,
+    planSelection: state.planSelection?.shiftId.startsWith("imp-") ? null : state.planSelection,
     comparison: state.comparison?.some((plan) => plan.shiftId.startsWith("imp-")) ? null : state.comparison,
     comparisonMeta: state.comparisonMeta?.scenarioId.startsWith("imp-") ? null : state.comparisonMeta,
   };
@@ -223,7 +240,7 @@ export function recordImportRemoved(state: DemoState): DemoState {
 
 export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
   const plan = planFor(state, method);
-  const s = { ...state, method, draftPlan: plan };
+  const s = { ...state, method, draftPlan: plan, draftContext: { input: planningInputSignature(state), plan: JSON.stringify(plan) }, planSelection: null };
   return log(s, {
     type: "plan_generated",
     role: "dispatcher",
@@ -235,7 +252,8 @@ export function generatePlan(state: DemoState, method: PlanMethod): DemoState {
 }
 
 export function comparePlans(state: DemoState): DemoState {
-  const plans = (["baseline", "rules", "model"] as PlanMethod[]).map((m) => planFor(state, m));
+  const context = planningContextFor(state);
+  const plans = (["baseline", "rules", "model"] as PlanMethod[]).map((method) => makePlan({ ...context, method }));
   const commonEligibleIds = new Set(plans[0].stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
   for (const plan of plans.slice(1)) {
     const eligible = new Set(plan.stops.filter((s) => !s.fixed && s.p !== null).map((s) => s.stopId));
@@ -257,6 +275,8 @@ export function comparePlans(state: DemoState): DemoState {
   const comparisonMeta: ComparisonMetadata = {
     scenarioId: `${shift.id}:${shift.date}`,
     runId: comparisonRunIdFor(state),
+    safetyRunId: planningInputSignature(state),
+    commonEligibleStopIds: [...commonEligibleIds].sort(),
     createdAt: new Date().toISOString(),
     dataset: shift.id.startsWith("imp-")
       ? "User-imported browser-only batch (validated; imported orders only)"
@@ -278,11 +298,45 @@ export function comparePlans(state: DemoState): DemoState {
   });
 }
 
+export function generateBestProposedPlan(state: DemoState): DemoState {
+  const compared = comparePlans(state);
+  const meta = compared.comparisonMeta!;
+  const { evaluations, winner, reason } = evaluateComparedPlans(compared.comparison!, planningContextFor(state), state.proposals.some(p => p.status === "open" && p.previous.shiftId === state.shiftId), meta.commonEligibleStopIds!);
+  const selection: PlanSelection = {
+    runId: meta.runId, inputSignature: planningInputSignature(state), scenarioId: meta.scenarioId,
+    shiftId: state.shiftId, evaluations, selectedMethod: winner?.method ?? null, selectedPlanId: winner?.id ?? null,
+    reason, experimentalWarning: winner?.method === "model" ? "Experimental Logistic Regression; simulated KPI ranking is not proof of better real-world delivery outcomes." : null,
+  };
+  let next: DemoState = { ...compared, method: winner?.method ?? state.method, draftPlan: winner, planSelection: selection,
+    draftContext: winner ? { input: selection.inputSignature, plan: JSON.stringify(winner) } : undefined };
+  if (winner) next = log(next, { type: "plan_generated", role: "dispatcher", summary: `Generated automatically selected ${winner.method} draft`, input: meta.scenarioId, output: describePlan(winner), computeMs: compared.comparison!.reduce((total, p) => total + p.computeMs, 0) });
+  return log(next, { type: winner ? "planner_auto_selected" : "planner_selection_review", role: "dispatcher", summary: winner ? `Automatically selected ${winner.method}; draft only` : "No eligible automatic plan; Dispatcher review required", input: JSON.stringify(meta), output: JSON.stringify(selection) });
+}
+
+export function useComparedDraft(state: DemoState, planId: string): DemoState {
+  const plan = state.comparison?.find(p => p.id === planId);
+  if (!plan || state.comparisonMeta?.safetyRunId !== planningInputSignature(state)) return log(state, { type: "draft_selection_blocked", summary: "Comparison is stale; regenerate before selecting a draft" });
+  return log({ ...state, draftPlan: plan, method: plan.method, draftContext: { input: planningInputSignature(state), plan: JSON.stringify(plan) } }, {
+    type: "plan_draft_selected", summary: `Manually selected ${plan.method} draft`,
+    input: JSON.stringify({ scenarioId: state.comparisonMeta.scenarioId, runId: state.comparisonMeta.runId, previousMethod: state.draftPlan?.method ?? null, automaticallySelected: state.planSelection?.selectedMethod ?? null }),
+    output: JSON.stringify({ planId: plan.id, method: plan.method, totals: plan.totals, safetyErrors: planSafetyErrors(plan, planningContextFor(state), state.proposals.some(p => p.status === "open" && p.previous.shiftId === state.shiftId)), dispatch: "Not dispatched; manual selection does not bypass safety checks." }),
+  });
+}
+
+export function draftDispatchBlocker(state: DemoState, plan: Plan): string | null {
+  if (state.role !== "dispatcher") return "Only Dispatcher can dispatch a plan.";
+  if (state.proposals.some(p => p.status === "open" && p.previous.shiftId === state.shiftId)) return "A replanning proposal is waiting. Review it in Replanning before dispatch.";
+  if (state.draftPlan?.id !== plan.id || !state.draftContext || state.draftContext.input !== planningInputSignature(state) || state.draftContext.plan !== JSON.stringify(plan)) return "Draft inputs changed or the draft has no current safety snapshot. Generate a new plan or select a fresh comparison draft.";
+  return planSafetyErrors(plan, planningContextFor(state), false)[0] ?? null;
+}
+
 export function dispatchPlan(state: DemoState, plan: Plan): DemoState {
+  if (draftDispatchBlocker(state, plan)) return state;
   const s: DemoState = {
     ...state,
     currentPlan: { ...state.currentPlan, [state.shiftId]: plan },
     draftPlan: null,
+    draftContext: undefined,
     proposals: state.proposals.map((p) => (p.status === "open" && p.previous.shiftId === state.shiftId ? { ...p, status: "superseded" as const, supersededBy: plan.id, decisionNote: "Superseded by a newly dispatched plan" } : p)),
   };
   return log(s, { type: "plan_dispatched", role: "dispatcher", summary: `Dispatched ${plan.method} plan to ${riderLabel(state.shiftId)}`, output: describePlan(plan) });

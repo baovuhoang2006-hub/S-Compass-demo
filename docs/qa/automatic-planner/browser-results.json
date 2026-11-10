@@ -1,0 +1,70 @@
+{
+  "desktop": {
+    "shift-wed": {
+      "winner": "model",
+      "parcels": 37,
+      "expectedSuccess": 30.891300000000015,
+      "minutesPerParcel": 18.255305254576967,
+      "finish": "19:28",
+      "oneClick": true,
+      "wholeWinningPlan": true,
+      "routeEtaSchedule": true,
+      "noAutoDispatch": true,
+      "manualOverride": true,
+      "staleGuards": true,
+      "pendingProposalProtected": true,
+      "evidence": true,
+      "errors": []
+    },
+    "shift-sat": {
+      "winner": "rules",
+      "parcels": 33,
+      "expectedSuccess": 22.9543,
+      "minutesPerParcel": 19.33925102547991,
+      "finish": "19:18",
+      "oneClick": true,
+      "wholeWinningPlan": true,
+      "routeEtaSchedule": true,
+      "noAutoDispatch": true,
+      "manualOverride": true,
+      "staleGuards": true,
+      "pendingProposalProtected": true,
+      "evidence": true,
+      "errors": []
+    }
+  },
+  "mobile": {
+    "shift-wed": {
+      "winner": "model",
+      "parcels": 37,
+      "expectedSuccess": 30.891300000000015,
+      "minutesPerParcel": 18.255305254576967,
+      "finish": "19:28",
+      "oneClick": true,
+      "wholeWinningPlan": true,
+      "routeEtaSchedule": true,
+      "noAutoDispatch": true,
+      "manualOverride": true,
+      "staleGuards": true,
+      "pendingProposalProtected": true,
+      "evidence": true,
+      "errors": []
+    },
+    "shift-sat": {
+      "winner": "rules",
+      "parcels": 33,
+      "expectedSuccess": 22.9543,
+      "minutesPerParcel": 19.33925102547991,
+      "finish": "19:18",
+      "oneClick": true,
+      "wholeWinningPlan": true,
+      "routeEtaSchedule": true,
+      "noAutoDispatch": true,
+      "manualOverride": true,
+      "staleGuards": true,
+      "pendingProposalProtected": true,
+      "evidence": true,
+      "errors": []
+    }
+  }
+}

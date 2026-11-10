@@ -168,6 +168,8 @@ export interface PlanTotals {
 export interface ComparisonMetadata {
   scenarioId: string;
   runId: string;
+  safetyRunId?: string;
+  commonEligibleStopIds?: string[];
   createdAt: string;
   dataset: string;
   planner: string;
