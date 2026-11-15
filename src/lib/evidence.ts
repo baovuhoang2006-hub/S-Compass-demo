@@ -19,6 +19,7 @@ export const EVENT_TYPES: Record<string, string> = {
   data_import_removed: "Imported data removed",
   import_risk_passed: "Import risk screening passed",
   import_risk_blocked: "Import stopped by risk screening",
+  safe_file_created: "Safe file created from a risky import",
   plan_generated: "Plan generated",
   planner_auto_selected: "Planner automatically selected",
   planner_selection_review: "Automatic planning requires review",

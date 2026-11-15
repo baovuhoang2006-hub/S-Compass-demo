@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, FlaskConical, ShieldAlert, ShieldCheck, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Download, FileSpreadsheet, FileText, FlaskConical, ShieldAlert, ShieldCheck, Trash2, Upload, Wand2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as React from "react";
 import { Stat } from "@/components/bits";
@@ -12,6 +12,8 @@ import { log, recordImport, recordImportRemoved, selectShift } from "@/lib/demoS
 import { importUseReason } from "@/lib/importSafety";
 import { screenImport, type RiskCase, type ScreenResult } from "@/lib/importRisk";
 import { FAR_PIN_METERS, HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, selectDeliverySheet, templateRows, toCsvText, uploadProblem, type ImportBatch, type RowStatus } from "@/lib/intake";
+import { buildSafeFile, LIMITS, safeTable, type SafeFileResult } from "@/lib/safeFile";
+import { buildSafeWorkbook } from "@/lib/safeWorkbook";
 import { downloadText } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
@@ -70,6 +72,9 @@ export default function IntakePage() {
   const fileRef = React.useRef<HTMLInputElement>(null);
   const [requirementsOpen, setRequirementsOpen] = React.useState(false);
   const [riskRecorded, setRiskRecorded] = React.useState(false);
+  // Raw rows of the last checked file, kept only in memory so a safe file can be built from them.
+  const [source, setSource] = React.useState<{ rows: unknown[][]; name: string } | null>(null);
+  const [safe, setSafe] = React.useState<SafeFileResult | null>(null);
 
   // Reset demo (from any page) clears the global import store and sets a new session id.
   // This page keeps its own local copy of the checked/imported batch, so re-sync it here —
@@ -81,11 +86,15 @@ export default function IntakePage() {
     setError(null);
     setNote(null);
     setRiskRecorded(false);
+    setSource(null);
+    setSafe(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.sessionId]);
 
-  const check = (rows: unknown[][], fileName: string, sheet: string | null) => {
+  const check = (rows: unknown[][], fileName: string, sheet: string | null, keepSafe = false) => {
     setRiskRecorded(false);
+    setSource({ rows, name: fileName });
+    if (!keepSafe) setSafe(null);
     const t0 = performance.now();
     const res = parseTable(rows, fileName, sheet);
     const ms = Math.round(performance.now() - t0);
@@ -177,6 +186,29 @@ export default function IntakePage() {
     setNote("Risk incident recorded in Evidence. Nothing was imported; the current plans are unchanged.");
   };
 
+  const createSafe = () => {
+    if (!source) return;
+    const r = buildSafeFile(source.rows, source.name);
+    setSafe(r);
+    update((st) => log(st, r.ok
+      ? { type: "safe_file_created", role: "dispatcher", summary: `Safe file created from ${r.sourceName}: ${r.safe.length} orders kept, ${r.actions.length} moved to the action list`, input: `${r.sourceName} · blocked by ${r.before.triggered.join(", ") || "none"}`, output: r.solved.map((x) => x.text).join(" | ") }
+      : { type: "safe_file_created", role: "dispatcher", summary: "Safe file could not be built", input: source.name, output: r.reason }));
+  };
+
+  const downloadSafe = async () => {
+    if (!safe?.ok) return;
+    const { default: writeXlsxFile } = await import("write-excel-file/browser");
+    const sheets = buildSafeWorkbook(safe, new Date().toLocaleString("en-GB"));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (writeXlsxFile as any)(sheets).toFile(safe.safeName);
+  };
+
+  const useSafe = () => {
+    if (!safe?.ok) return;
+    check(safeTable(safe.safe), safe.safeName, "2. Safe orders", true);
+    setNote(`Safe file loaded and re-checked: ${safe.safe.length.toLocaleString()} orders. Review the screening below, then import. The ${safe.actions.length.toLocaleString()} moved orders stay in the action list.`);
+  };
+
   const open = (shiftId: string) => {
     update((st) => selectShift(st, shiftId));
     router.push("/dispatcher");
@@ -251,6 +283,9 @@ export default function IntakePage() {
       {batch && s ? (
         <>
           {screen ? <RiskScreen screen={screen} recorded={riskRecorded} onRecord={recordRiskIncident} /> : null}
+          {screen && !isActive && source && (screen.status !== "ok" || safe) ? (
+            <SafeFilePanel safe={safe} canCreate={screen.status !== "ok" && !safe} onCreate={createSafe} onDownload={downloadSafe} onUse={useSafe} usingSafe={batch.fileName.endsWith("_SAFE.xlsx")} />
+          ) : null}
           <Panel>
             <PanelHeader
               title={`Check results · ${batch.fileName}${batch.sheet ? ` (sheet “${batch.sheet}”)` : ""}`}
@@ -390,6 +425,64 @@ export default function IntakePage() {
         <p className="mt-4 text-xs text-ink-soft">Session: {state.sessionId.slice(-6)} · Import and removal actions are recorded in Evidence.</p>
       </details></Panel>
     </div>
+  );
+}
+
+function SafeFilePanel({ safe, canCreate, onCreate, onDownload, onUse, usingSafe }: { safe: SafeFileResult | null; canCreate: boolean; onCreate: () => void; onDownload: () => void; onUse: () => void; usingSafe: boolean }) {
+  const RISK_LABEL = { overload: "System overload", ai: "AI uncertainty", data: "Anomalous data" } as const;
+  return (
+    <Panel aria-label="Safe file">
+      <div className="flex flex-wrap items-start gap-3 border-b border-line px-5 py-4">
+        <Wand2 aria-hidden="true" className="mt-0.5 size-6 shrink-0 text-brand" />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold">Step 2 — Create a safe file</h2>
+          <p className="mt-1 text-sm text-ink-soft">S-Compass keeps what is safe, fixes only what is certain, and moves the rest to an action list with a reason. Nothing is invented and the original file is not changed. A dispatcher still approves the import.</p>
+        </div>
+        {canCreate ? <Button variant="primary" onClick={onCreate}><Wand2 /> Create safe file</Button> : null}
+      </div>
+      {safe && !safe.ok ? <p role="alert" className="px-5 py-4 text-sm text-bad">{safe.reason}</p> : null}
+      {safe?.ok ? (
+        <div className="space-y-4 px-5 py-4">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead><tr className="border-b border-line text-left text-xs text-ink-faint"><th className="py-2 pr-3">Risk check</th><th className="py-2 pr-3">Original file</th><th className="py-2 pr-3" aria-label="becomes" /><th className="py-2 pr-3">Safe file</th><th className="py-2">Limit</th></tr></thead>
+              <tbody>
+                {([
+                  ["overload", "Largest rider-day", `${safe.before.maxDay} parcels`, `${safe.after.maxDay} parcels`, `${LIMITS.day}`],
+                  ["ai", "Orders with no pin or repeat attempt", `${safe.before.lowInfoPct}%`, `${safe.after.lowInfoPct}%`, `under ${LIMITS.ai}%`],
+                  ["data", "Rows quarantined", `${safe.before.quarantinedPct}%`, `${safe.after.quarantinedPct}%`, `under ${LIMITS.quar}%`],
+                ] as const).map(([kind, label, b, a, lim]) => {
+                  const bad = safe.before.triggered.includes(kind);
+                  const badAfter = safe.after.triggered.includes(kind);
+                  return (
+                    <tr key={kind} className="border-b border-line last:border-0">
+                      <td className="py-2 pr-3"><span className="font-medium">{RISK_LABEL[kind]}</span><span className="block text-xs text-ink-faint">{label}</span></td>
+                      <td className="py-2 pr-3"><Badge tone={bad ? "bad" : "ok"}>{b}</Badge></td>
+                      <td className="py-2 pr-3"><ArrowRight aria-hidden="true" className="size-4 text-ink-faint" /></td>
+                      <td className="py-2 pr-3"><Badge tone={badAfter ? "bad" : "ok"}>{a}</Badge></td>
+                      <td className="py-2 text-xs text-ink-soft">{lim}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Stat label="Kept in safe file" value={safe.safe.length.toLocaleString()} />
+            <Stat label="Fixed automatically" value={safe.fixedCount.toLocaleString()} />
+            <Stat label="Moved to action list" value={safe.actions.length.toLocaleString()} />
+          </div>
+          <ul className="space-y-2 text-sm">
+            {safe.solved.map((x) => <li key={x.kind} className="rounded-lg border border-line p-3"><b>{RISK_LABEL[x.kind]}:</b> {x.text}</li>)}
+          </ul>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="primary" onClick={onDownload}><Download /> Download safe file (Excel, 3 sheets)</Button>
+            {!usingSafe ? <Button variant="ok" onClick={onUse}><ShieldCheck /> Check the safe file now</Button> : <Badge tone="ok"><ShieldCheck /> Safe file loaded — import it below</Badge>}
+            <span className="text-xs text-ink-faint">Sheet 1 Summary · Sheet 2 Safe orders (fixed cells in yellow) · Sheet 3 Action list</span>
+          </div>
+        </div>
+      ) : null}
+    </Panel>
   );
 }
 
