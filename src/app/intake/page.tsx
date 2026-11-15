@@ -7,11 +7,11 @@ import { Stat } from "@/components/bits";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader } from "@/components/ui/panel";
-import { activeImportBatch, saveImportedLocal, setImported } from "@/lib/data";
+import { activeImportBatch, commitImportedBatch } from "@/lib/data";
 import { log, recordImport, recordImportRemoved, selectShift } from "@/lib/demoState";
 import { importUseReason } from "@/lib/importSafety";
 import { screenImport, type RiskCase, type ScreenResult } from "@/lib/importRisk";
-import { FAR_PIN_METERS, HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, templateRows, toCsvText, type ImportBatch, type RowStatus } from "@/lib/intake";
+import { FAR_PIN_METERS, HEAVY_DAY_PARCELS, MAX_ROWS, messySampleRows, parseCsv, parseTable, selectDeliverySheet, templateRows, toCsvText, uploadProblem, type ImportBatch, type RowStatus } from "@/lib/intake";
 import { downloadText } from "@/lib/utils";
 import { useDemo } from "@/state/DemoProvider";
 
@@ -50,22 +50,12 @@ const OPTIONAL_COLUMNS = [
 
 async function readFile(file: File): Promise<{ rows: unknown[][]; sheet: string | null }> {
   const name = file.name.toLowerCase();
+  const problem = uploadProblem(file.name, file.size);
+  if (problem) throw new Error(problem);
   if (name.endsWith(".csv") || name.endsWith(".txt")) return { rows: parseCsv(await file.text()), sheet: null };
-  if (name.endsWith(".xls")) throw new Error("Old .xls files are not supported. In Excel choose File › Save As › Excel Workbook (.xlsx) or CSV.");
   const { default: readXlsxFile } = await import("read-excel-file/browser");
   const sheets = await readXlsxFile(file);
-  // Pick the sheet whose first rows look most like delivery data.
-  let best = sheets[0];
-  let bestScore = -1;
-  for (const s of sheets) {
-    const test = parseTable(s.data as unknown[][], file.name, s.sheet);
-    const score = test.ok ? test.batch.summary.rowsRead : -1;
-    if (score > bestScore) {
-      best = s;
-      bestScore = score;
-    }
-  }
-  return { rows: (best?.data ?? []) as unknown[][], sheet: best?.sheet ?? null };
+  return selectDeliverySheet(sheets as { sheet: string; data: unknown[][] }[], file.name);
 }
 
 export default function IntakePage() {
@@ -100,9 +90,11 @@ export default function IntakePage() {
     const res = parseTable(rows, fileName, sheet);
     const ms = Math.round(performance.now() - t0);
     if (!res.ok) {
-      setError({ text: res.error, found: res.foundColumns });
-      setBatch(null);
-      setIsActive(false);
+      const text = `Case C — Anomalous data: ${res.error} A/B were not assessed; no delivery rows were imported.`;
+      setError({ text, found: res.foundColumns });
+      setBatch(activeImportBatch());
+      setIsActive(activeImportBatch() !== null);
+      update((st) => log(st, { type: "import_risk_blocked", role: "dispatcher", summary: "Case C — structural file validation stopped import", input: fileName, output: text }));
       return;
     }
     setError(null);
@@ -119,8 +111,12 @@ export default function IntakePage() {
       const { rows, sheet } = await readFile(file);
       check(rows, file.name, sheet);
     } catch (e) {
-      setError({ text: e instanceof Error ? e.message : "The file could not be read.", found: [] });
-      setBatch(null);
+      const reason = e instanceof Error ? e.message : "The file could not be read.";
+      const text = reason.startsWith("Case ") ? reason : `Case C — Anomalous data: ${reason} Rows and AI inference were not checked.`;
+      setError({ text, found: [] });
+      setBatch(activeImportBatch());
+      setIsActive(activeImportBatch() !== null);
+      update((st) => log(st, { type: "import_risk_blocked", role: "dispatcher", summary: "File reading stopped import", input: file.name, output: text }));
     } finally {
       setBusy(false);
       if (fileRef.current) fileRef.current.value = "";
@@ -140,8 +136,8 @@ export default function IntakePage() {
       setNote(lockReason);
       return;
     }
-    setImported(batch);
-    const warn = saveImportedLocal(batch);
+    const warn = commitImportedBatch(batch);
+    if (warn) { setNote(`Import stopped: ${warn} The active dataset and plans are unchanged.`); return; }
     const s = batch.summary;
     update((st) => {
       const selectedOldImport = previousBatch?.shifts.some((shift) => shift.id === st.shiftId) ?? false;
@@ -154,7 +150,7 @@ export default function IntakePage() {
       return log(imported, {
         type: "import_risk_passed",
         role: "dispatcher",
-        summary: `${sc.incidentId}: screening passed — safe to import`,
+        summary: `${sc.incidentId}: screening passed${sc.status === "warning" ? " with warnings" : ""} — eligible orders only`,
         input: batch.fileName,
         output: sc.okReason,
       });
@@ -193,8 +189,8 @@ export default function IntakePage() {
       setNote(lockReason);
       return;
     }
-    setImported(null);
-    saveImportedLocal(null);
+    const warn = commitImportedBatch(null);
+    if (warn) { setNote(`Removal stopped: ${warn} The active dataset and plans are unchanged.`); return; }
     update((st) => recordImportRemoved(st));
     setBatch(null);
     setIsActive(false);

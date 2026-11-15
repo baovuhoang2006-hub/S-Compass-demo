@@ -75,8 +75,6 @@ export default function DispatcherPage() {
   const dispatchBlockReason = draft ? draftDispatchBlocker(state, draft) : null;
   const generateProposedPlan = () => update(generateBestProposedPlan);
   const comparisonCurrent = state.comparisonMeta?.runId === comparisonRunIdFor(state) && state.comparisonMeta?.safetyRunId === planningInputSignature(state);
-  const selection = state.planSelection?.shiftId === shift.id ? state.planSelection : null;
-  const selectionCurrent = selection?.inputSignature === planningInputSignature(state);
   const baselinePlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "baseline") : undefined;
   const rulesPlan = comparisonCurrent ? state.comparison?.find((p) => p.method === "rules") : undefined;
   const comparisonReady = !!(baselinePlan && rulesPlan && state.comparisonMeta);
@@ -185,17 +183,6 @@ export default function DispatcherPage() {
           ) : (
             <p className="px-4 py-6 text-sm text-ink-faint">No draft or dispatched plan yet.</p>
           )}
-          {selection ? <div className="space-y-2 border-t border-line px-4 py-3" aria-label="Automatic planner selection">
-            {!selectionCurrent ? <p role="status" className="text-sm text-warn">Selection is out of date. Inputs changed; generate a new proposed plan before dispatch.</p> : <>
-              <p className="text-sm font-semibold">{selection.selectedMethod ? draft && draft.id !== selection.selectedPlanId ? `Manual draft: ${METHOD_LABEL[draft.method]}. Automatic recommendation: ${METHOD_LABEL[selection.selectedMethod]}.` : `Automatically selected: ${METHOD_LABEL[selection.selectedMethod]}` : "Dispatcher review required — no automatic draft"}</p>
-              <p className="text-sm text-ink-soft">{selection.reason}</p>
-              {selection.experimentalWarning ? <p className="text-xs text-warn">{selection.experimentalWarning}</p> : null}
-            </>}
-            <details><summary className="cursor-pointer text-sm font-medium">Selection details &amp; safety checks</summary><div className="mt-2 space-y-3">
-              <p className="break-words text-xs text-ink-faint">Run: {selection.runId} · {selection.scenarioId}. All estimates use the common history-table sample; model predictions are separate.</p>
-              {selection.evaluations.map(e => <div key={e.method} className="rounded-lg border border-line p-3 text-sm"><p className="font-semibold">{METHOD_LABEL[e.method]} · {e.eligible ? "Eligible" : "Not eligible for automatic selection"}</p><p>Expected first attempts: {e.expectedSuccess?.toFixed(1) ?? "Invalid"} / {e.eligibleStopIds.length} · Minutes/parcel: {e.minutesPerParcel?.toFixed(1) ?? "Not comparable"}</p>{e.errors.map(error => <p key={error} className="mt-1 text-bad">{error}</p>)}{e.warnings.map(warning => <p key={warning} className="mt-1 text-warn">Warning: {warning}</p>)}</div>)}
-            </div></details>
-          </div> : null}
           <p className="border-t border-line px-4 py-2 text-xs text-ink-faint">Source: de-identified delivery history · Method: {shown ? METHOD_LABEL[shown.method] : "not run"}.</p>
         </Panel>
         <Panel>
